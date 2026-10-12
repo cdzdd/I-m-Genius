@@ -1,0 +1,44 @@
+{
+  "name": "whativedone",
+  "version": "0.1.0",
+  "description": "Privacy-focused progress worklog for Codex and Claude Code on Windows",
+  "license": "MIT",
+  "author": "cdzdd",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/cdzdd/I-m-Genius.git"
+  },
+  "homepage": "https://github.com/cdzdd/I-m-Genius#readme",
+  "bugs": "https://github.com/cdzdd/I-m-Genius/issues",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "whativedone": "dist/src/cli.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "test": "npm run build && node --test dist/test/*.test.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "proper-lockfile": "^4.1.2",
+    "smol-toml": "^1.9.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/proper-lockfile": "^4.1.4",
+    "typescript": "^5.0.0"
+  },
+  "files": [
+    "dist/src/*.js",
+    "src/*.ts",
+    "package-lock.json",
+    "tsconfig.json",
+    "README.md",
+    "README.en.md",
+    "PRIVACY.md",
+    "LICENSE",
+    "THIRD_PARTY_NOTICES.md",
+    "licenses/"
+  ]
+}
