@@ -1,6 +1,6 @@
 # 隐私与数据边界 / Privacy and data boundaries
 
-[中文使用指引](README.md) · [English guide](README.en.md)
+[中文使用指引](README.zh-CN.md) · [English guide](README.md)
 
 I-m-Genius 限制保留与上传的数据，便于使用者审查。它不提供操作系统沙箱，也不承诺绝对保密。AI 客户端、插件、Git、凭据管理器、Windows 和其他进程有各自的访问权限与联网行为。
 

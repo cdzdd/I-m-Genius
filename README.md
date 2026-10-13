@@ -1,75 +1,58 @@
 # I-m-Genius
 
-[English](README.en.md) · [隐私与上传边界](PRIVACY.md) · [MIT License](LICENSE)
+[中文](README.zh-CN.md) · [Privacy and data boundaries](PRIVACY.md) · [MIT License](LICENSE)
 
-**让你和 AI 的努力，被看见。**
+**Your work with AI deserves a record.**
 
-I-m-Genius 是一个轻量、自动、可审查的 AI 工作日志工具。把 Codex、Claude Code 中的开发进展汇总到一个 `WORKLOG.md`，用每日计数和成就称号回顾你与 AI 推进工作的过程。无需为每个小项目建立仓库，也无需上传项目代码或对话正文。
+Research, planning, long conversations and debugging all take effort. Much of it never becomes a shipped feature or a repository: small experiments may stay unversioned, private projects may stay off public hosts, and work can be spread across tools and hosting platforms. A contribution graph captures only part of that story.
 
-**当前为 Windows 预览版，接入 Codex 和 Claude Code。** [开始安装](#安装前准备) · [了解记录链路](#记录链路清晰可见)
+I-m-Genius helps you recognize that work. It gathers progress reported by the AI into one local Markdown journal with real Git history, so you can look back on the effort you put in without publishing your working projects' code.
 
-## 提交记录之外，还有很多努力
+**v0.1.0 is a Windows preview for Codex and Claude Code.** Recording depends on the AI making a valid classification call; an entry for every conversation is not guaranteed.
 
-你可能每天在多个 AI 工具里进行大量对话：调研思路、尝试实现、排查问题、反复验证。但这些投入未必出现在仓库的贡献图上：
+## Why use it?
 
-- 有些探索最终没有形成可发布的产出，却帮你验证了方案、排除了错误方向。
-- 有些工作只发生在本地小项目或私有项目中，你没有时间为它们建仓库、维护版本，或不方便公开代码。
-- 有些项目只在 GitHub 或 Gitee 的一个平台维护，加上工作散落在不同工具中，单个平台的提交记录难以呈现你的全部投入。
+- **Lightweight capture.** Native client hooks and a small local worker fit into your existing workflow. The AI already working on your task chooses a fixed category and status; there is no separate AI summarizer.
+- **A small, consistent journal.** Entries contain UTC time, category, status and a daily badge. No conversation body, project name, chat title or free-text summary goes into the journal.
+- **Local first, sharing by choice.** A local queue feeds `WORKLOG.md` and real Git commits. Journal upload starts only after you explicitly enable it.
+- **History you can inspect.** Preview the full journal, changes and Git identity. Audited history can go to one HTTPS Git repository and one optional mirror, with independent retries for each destination.
 
-I-m-Genius 为这些过程留下简洁、可回顾的进展记录。调研、方案、实现、验证、排障都可以成为一天里的一个足迹；每日递增的计数和称号，让你看见自己的积累，也获得一点完成工作的成就感。
-
-**探索值得记录，努力值得认可。** 日志记录的是已报告的进展；贡献图是否显示提交仍由托管平台的规则决定。
-
-## 轻量记录，隐私边界明确
-
-| 特点 | 你得到什么 |
-| --- | --- |
-| 对话正文不保存、不上传 | 不扫描历史对话文件；原始对话、工具输出和项目路径不会写入进展队列或日志仓库。 |
-| 原生钩子 + 固定字段 | 由当前工作的 AI 选择预定义类别与状态；没有可把对话带出去的自由文本摘要字段。 |
-| 轻量、方便审查 | 生产逻辑集中在七个可读模块，无需额外接入 AI 摘要服务；联网和子进程入口集中在一个文件中。 |
-| 配置后后台记录 | 原生事件捕获后，本地后台约每分钟处理一次；有效分类自动追加到同一个 Markdown 日志，减少手工整理。 |
-| 同步由你开启 | 默认只在本地记录，上传前可预览完整内容；开启后可同步到一个日志仓库及一个镜像，例如 GitHub + Gitee。 |
-
-## 记录链路清晰可见
+## How it works
 
 ```mermaid
 flowchart TD
-    A[原生钩子提供分类提示] --> B[当前 AI 调用工具：固定类别 + 状态]
-    B --> C[原生工具完成事件：校验并投影固定字段]
-    C --> D[本地队列 → WORKLOG.md + 本地 Git 提交]
-    D --> E[你开启同步后 → 指定日志仓库及可选镜像]
+    H[Native hooks supply a classification prompt] --> A[Current AI: fixed category and status]
+    A --> V[Native PostToolUse event: validate and project]
+    V --> J[Local queue → WORKLOG.md + local Git]
+    J -->|enable-sync| G[HTTPS repository + optional mirror]
 ```
 
-[`capture.ts`](src/capture.ts) 处理原生事件，[`mcp.ts`](src/mcp.ts) 只接受固定分类，[`publish.ts`](src/publish.ts) 生成并审查日志历史，[`transport.ts`](src/transport.ts) 集中管理 Git 上传。上传目标、待发送内容和发送结果都可以在本地查看；从事件到记录再到同步，代码和数据边界均可审查。
+Hooks can briefly receive raw prompt text; capture discards it and never opens transcript files. Original client configuration backups stay local and may contain sensitive settings. **Git upload also sends names, email addresses, times and other metadata; a public journal exposes them.** These limits are not an absolute privacy or security guarantee. Read [PRIVACY.md](PRIVACY.md) before enabling upload.
 
-**上传的日志行只包含 UTC 时间、预定义类别、预定义状态，以及由当日条数生成的计数和固定称号。** 不包含对话正文、自由文本摘要、项目代码、路径或原始会话标识。
-
-隐私边界也公开说明：原生钩子输入可能短暂包含对话原文，程序解析后丢弃，不保留或上传；初始化会在本机备份原客户端配置；Git 同步会附带你配置的姓名、邮箱和提交元数据。可使用私有日志仓库和平台提供的 noreply 邮箱。具体保存内容、联网入口及审查方法见 [PRIVACY.md](PRIVACY.md)。
-
-## 每天的进展，一眼可见
+A journal entry looks like this:
 
 | 时间（UTC） | 类别 | 状态 | 进度 |
 | --- | --- | --- | --- |
 | 2026-10-12 08:15:30 | 实现 | 进行中 | 1 commit! smart! |
 | 2026-10-12 08:26:12 | 验证 | AI报告完成 | 2 commit! smart! |
 
-这里的 `N commit!` 计数是**当天新增的状态记录数**。后台约每分钟处理一批，多条状态可能合为一个真实 Git 提交；它不是 Git 提交数量，也不衡量代码质量或工作时长。`AI报告完成` 是 AI 的声明。
+The current journal headings and category/status labels are Chinese. `N commit!` counts **new state rows on that UTC date**, not Git commits. Several rows processed in one batch can share a real Git commit. The count does not measure code quality or hours worked. “AI报告完成” means the AI reports completion.
 
-## 安装前准备
+## Requirements
 
-- Windows x64、Node.js 和 npm、Git for Windows。开发验证环境为 Node.js **22.14.0**、Git **2.49.0.windows.1**；其他环境尚未完整验证。
-- Git 必须位于 `C:/Program Files/Git/cmd/git.exe`。这版不从任意 PATH 中选择 Git。
-- 要接入的 Codex 和／或 Claude Code 已安装、登录并能正常使用。具体安装位置和兼容范围见[下方说明](#支持范围与限制)。
-- 默认后台启动需要系统自带的 `%SystemRoot%/Microsoft.NET/Framework64/v4.0.30319/csc.exe`，用于在本机编译一个小启动器；不下载启动器。缺少此文件时可以选择手动模式。
-- 在 GitHub、Gitee、GitLab 等服务中，**新建独立的空日志仓库**：不要初始化 README、许可证或 `.gitignore`。可选择私有仓库。可选镜像也必须为空，且 URL 与主仓库不同。
+- Windows x64, Node.js with npm, and Git for Windows. The development environment uses Node.js **22.14.0** and Git **2.49.0.windows.1**; other environments have not been fully qualified.
+- Git at `C:/Program Files/Git/cmd/git.exe`. This preview does not choose an arbitrary Git executable from PATH.
+- Codex and/or Claude Code installed, authenticated and working. Supported entry discovery is described [below](#support-and-limitations).
+- Automatic background startup uses the Windows .NET Framework compiler at `%SystemRoot%/Microsoft.NET/Framework64/v4.0.30319/csc.exe`. It builds a small launcher locally, without downloading a launcher. Use manual mode if the compiler is unavailable.
+- A **new, separate, empty journal repository** on GitHub, Gitee, GitLab or another HTTPS Git host. Do not initialize a README, license or `.gitignore`. A private repository is supported. An optional mirror must also be empty and have a different URL.
 
-**本仓库 `cdzdd/I-m-Genius` 是项目源码仓库。不要将它或你的工作项目用作日志目标。** 当前版本只支持新建空日志仓库、一个写入设备和固定 `main` 分支，不导入已有项目或已有日志历史。
+**`cdzdd/I-m-Genius` is the project's source repository. Do not use it, or your work project's repository, as the journal destination.** This preview supports a new empty journal, one writing computer, and the fixed `main` branch. It does not import existing project or journal history.
 
-准备日志仓库的 HTTPS 地址，例如 `https://github.com/YOUR_NAME/my-ai-data.git`。上传使用 Git 的正常凭据管理；请先确保你能通过正常 Git 登录流程访问仓库，不要把密码或 token 写入 URL、命令示例或对话。
+Use an HTTPS destination such as `https://github.com/YOUR_NAME/my-ai-data.git`. Upload uses normal Git credential management. Ensure ordinary Git authentication works for your repository. Do not put passwords or tokens in URLs, commands or chat messages.
 
-## 1. 下载并构建
+## 1. Clone and build
 
-在普通 PowerShell 中运行，不需要以管理员身份启动：
+Run in a regular PowerShell session; administrator privileges are not required:
 
 ```powershell
 New-Item -ItemType Directory -Path C:/AI -Force | Out-Null
@@ -79,71 +62,73 @@ npm ci
 npm run build
 ```
 
-这是从源码安装。依赖由锁文件确定，尚未发布 npm 安装包；`npm ci` 会联网下载依赖。安装后不要移动源码目录、Node 程序或数据目录，钩子和后台任务会保存其绝对路径。
+Installation is from the source checkout; no npm install package is published. `npm ci` downloads the locked dependencies. After installation, keep the source directory, Node executable and private data directory in place: client hooks and the startup task store absolute paths.
 
-## 2. 初始化并接入 AI 工具
+## 2. Initialize and connect the clients
 
-替换下面的仓库、Git 姓名和邮箱。邮箱会进入 Git 历史；需要隐藏个人邮箱时，使用托管平台邮箱设置中显示的完整 noreply 地址。
+Replace the destination, Git name and email. The email becomes Git history metadata. If you want a noreply address, copy the complete address displayed in your hosting account's email settings.
 
 ```powershell
 $config = 'C:/AI/I-m-Genius-data/config.json'
 node .\dist\src\cli.js init --config $config --repo https://github.com/YOUR_NAME/my-ai-data.git --name 'YOUR_NAME' --email 'YOUR_GIT_EMAIL' --source codex --source claude
 ```
 
-只使用一个工具时，去掉另一个 `--source`。初始化会合并本项目的三类钩子和名为 `whativedone` 的 MCP 服务，保留已有客户端配置，并在私有数据目录保留原配置备份。不会切换模型、修改账号或替你授予客户端信任。
+Remove one `--source` if you only use one client. Initialization merges three owned hooks and registers a stdio MCP server named `whativedone`, preserving existing client configuration and keeping original configuration backups in the private data directory. It does not change accounts, select a model or grant client trust for you.
 
-`I-m-Genius-data` 必须不存在或为空，且应与源码目录分开。命令成功会打印 `configPath`；请将 `$config` 改为**打印出的实际路径**，后续命令继续使用它。Windows 打包应用的文件重定向可能使该路径与输入值不同。不要对已存在的安装重新执行 `init`。
+The private directory must be absent or empty and separate from the source checkout. Successful initialization prints `configPath`. Set `$config` to that **exact printed path** for all later commands: Windows packaged-app filesystem redirection can change the physical location. Do not rerun `init` on an existing installation.
 
-初始模式为 `local`，此时本项目不执行日志仓库的 Git 网络操作。默认安装当前用户的登录启动任务，立即启动无终端窗口的后台处理程序，之后每约 60 秒处理一次队列。它以普通用户权限运行，只有登录后才运行。
+The initial mode is `local`: this project's journal Git network operations are disabled. By default, initialization installs a current-user logon task and starts the worker immediately without a terminal window. It processes a batch approximately every 60 seconds, runs without elevation, and requires a logged-in user.
 
-如果不需要自动后台处理，在初始化命令末尾添加 `--no-startup`，然后在需要记录时保持下面的窗口运行；该窗口关闭后会停止处理，钩子取得的事件仍在本地等待：
+For manual processing, append `--no-startup` to `init`, then keep this command running while you want the journal updated:
 
 ```powershell
 node .\dist\src\cli.js sync --watch --config $config
 ```
 
-## 3. 在本地试用
+Closing this manual window stops processing. Events captured by the hooks remain queued locally.
 
-重启 Codex、重新加载使用 Claude Code 的编辑器窗口，或重开 Claude Code CLI，让 MCP 服务重新连接。通过客户端的正常流程确认 MCP／工作区信任和钩子许可；Codex 的原生钩子信任需要在客户端中确认，安装程序不会绕过。
+## 3. Test locally
 
-在新对话中完成一个有实际进展的小任务。正常情况下，AI 会调用 `mcp__whativedone__classify_progress`，只传入类别和状态。等待约一分钟后查看：
+Restart Codex, reload the editor window using Claude Code, or reopen Claude Code CLI to reconnect the MCP server. Grant MCP/workspace trust and hook permission through the clients' normal flows. Codex native hook trust requires confirmation in Codex; installation does not bypass it.
+
+Complete a small task with meaningful progress in a new chat. The AI should call `mcp__whativedone__classify_progress` with only category and status. Wait about a minute, then inspect:
 
 ```powershell
 node .\dist\src\cli.js status --config $config
 node .\dist\src\cli.js preview --config $config
 ```
 
-日志位于打印出的配置目录下的 `repository/WORKLOG.md`。首次取得有效分类前，该文件可以尚未生成。`preview` 显示待上传的本地 Git 提交、完整日志、修改内容和 Git 身份；它不联网，也不处理队列。手动模式下可先运行一次 `sync --config $config`。
+The journal is `repository/WORKLOG.md` under the printed configuration directory. It may not exist until the first valid classification. `preview` shows pending local Git commits, full journal content, patches and Git identity. It does not contact the network or drain the queue. In manual mode, run `sync --config $config` once first if needed.
 
-AI 分类依赖工具调用，不能保证每个对话都会记录。同一轮重复报告相同类别／状态不会重复追加；`none/unknown` 只在本地处理，不写入日志。不扫描历史对话，也不根据停止事件猜测已完成。
+Recording depends on the AI making the classification tool call; a record for every chat is not guaranteed. Repeated identical category/status values within a turn do not append another row. `none/unknown` stays local. There is no transcript scan or assumption that a stopped task is completed.
 
-## 4. 检查后开启上传
+## 4. Review and enable upload
 
-确认预览中的内容和 Git 邮箱符合你的预期，再执行：
+Review preview and your Git email, then run:
 
 ```powershell
 node .\dist\src\cli.js enable-sync --config $config
 ```
 
-需要同时写入另一服务时，在**首次开启上传**时使用下面的命令代替上面的命令：
+To upload to a second host, use this **instead, during first enablement**:
 
 ```powershell
 node .\dist\src\cli.js enable-sync --config $config --mirror https://gitee.com/YOUR_NAME/my-ai-data.git
 ```
 
-也可以在 `init` 时指定 `--mirror`，初始状态仍为本地模式。请在首次开启上传时确定全部目标：目前不支持向已经有日志的主目标追加一个新镜像。
+`init` also accepts `--mirror` while remaining local. Choose both destinations before first enablement: adding a new mirror after the primary contains journal history is not supported.
 
-`enable-sync` 会显示目标、分支和 Git 身份，联网检查所有目标为空，再保存未来批次的上传授权。此后无需逐条确认；后台会把同一份审核过的历史上传到两处。一处断网或认证失败时独立重试，不影响本地记录和另一处；不强制推送。仓库出现未知历史或内容被手动修改时，会拒绝上传并显示固定错误。
+`enable-sync` displays the targets, branch and Git identity, checks every destination is empty, and saves authorization for future rule-based batches. It does not ask for approval per row. Both hosts receive the same audited history. Authentication or network failure at one destination is retried independently and does not block local recording or the healthy destination. Unknown remote history or manual journal changes block publication instead of forcing an overwrite. No force push is used.
 
-源码仓库和日志仓库相互独立；工作项目文件、原始对话、应用配置备份不会加入日志仓库。**实际上传还包含 Git 作者／提交者姓名、邮箱、时间、固定提交信息及 Git 对象元数据**，详情见 [PRIVACY.md](PRIVACY.md)。
+The source checkout and journal repository are separate. Work project files, raw conversations and client configuration backups are excluded from the journal repository. **A push also transmits Git author/committer names, email addresses, times, fixed commit messages and Git object metadata.** Read [PRIVACY.md](PRIVACY.md) for the exact boundaries.
 
-## 每日计数
+## Daily labels
 
-时间为 UTC，显示格式为 `YYYY-MM-DD HH:MM:SS`。类别为调研／方案／实现／验证／排障；状态为进行中／等待输入／受阻／AI报告完成。
+Times use UTC in `YYYY-MM-DD HH:MM:SS` format. Categories are research / planning / implementation / verification / debugging; statuses are in progress / waiting for input / blocked / AI-reported done. The Chinese labels are shown in the journal.
 
-计数按 UTC 日期重新从 1 开始，每 20 条更换一个固定称号，最后一档不再变化，数字继续增长：
+Each UTC date starts at one. The label advances after each group of 20 rows. Counts continue without a cap; the last label stays the same:
 
-| 当天状态数 | 称号 |
+| Daily state rows | Label |
 | --- | --- |
 | 1–20 | smart! |
 | 21–40 | clever! |
@@ -154,9 +139,9 @@ node .\dist\src\cli.js enable-sync --config $config --mirror https://gitee.com/Y
 | 121–140 | super genius! |
 | 141+ | absolute incredible genius! |
 
-## 管理、升级与卸载
+## Manage, upgrade and uninstall
 
-以下命令均在源码目录执行，并继续使用初始化打印的 `$config`：
+Run these from the source directory, using the exact saved `$config` path:
 
 ```powershell
 node .\dist\src\cli.js status --config $config
@@ -166,11 +151,11 @@ node .\dist\src\cli.js start --config $config
 node .\dist\src\cli.js uninstall --config $config
 ```
 
-- `pause` 停止新捕获和上传，已开始的批次可能完成；`resume` 恢复并重新检查出错状态，不修复违规历史。
-- `start` 启动已安装的后台任务；已运行时不会创建第二个记录进程。手动模式请使用 `sync --watch`。
-- `uninstall` 关闭捕获，移除匹配的本项目钩子、MCP 注册和登录任务，**保留日志、配置和备份**；对已被别人修改的注册不会盲目删除。不要在卸载前改变 `CODEX_HOME` 或 `CLAUDE_CONFIG_DIR`。
+- `pause` stops new capture and publication; an in-flight batch can finish. `resume` restores capture and requests revalidation of errors, without repairing invalid history.
+- `start` runs the already installed background task. An active worker is not duplicated. For manual mode, use `sync --watch`.
+- `uninstall` disables capture and removes matching owned hooks, MCP registration and the logon task. It **retains journal history, configuration and backups**. Modified third-party registrations are not blindly removed. Keep `CODEX_HOME` / `CLAUDE_CONFIG_DIR` unchanged until uninstall finishes.
 
-升级时先暂停，保持原目录更新源码和构建：
+For an upgrade, pause first. Keep all installation paths unchanged and update the source/build:
 
 ```powershell
 node .\dist\src\cli.js pause --config $config
@@ -179,43 +164,43 @@ npm ci
 npm run build
 ```
 
-随后退出 Windows 登录并重新登录，或重启 Windows，让旧 Node／MCP 进程退出。登录任务会加载新构建，此时捕获仍暂停。重新打开 PowerShell，进入 `C:/AI/I-m-Genius`，将 `$config` 重新设置为保存的实际路径，再运行：
+Then sign out of Windows and sign back in, or restart Windows, so the old worker and MCP processes exit. The logon task loads the new build while capture remains paused. Reopen PowerShell in `C:/AI/I-m-Genius`, set `$config` to the saved physical path again, and run:
 
 ```powershell
 node .\dist\src\cli.js resume --config $config
 node .\dist\src\cli.js start --config $config
 ```
 
-最后重启／重新加载 AI 客户端。不要重新初始化，也不要手动更改日志、Git 历史或上传目标；旧格式的合法日志会在后续记录中自动进行固定的显示升级，保留原始时间／类别／状态和历史提交。
+Reconnect/reload the AI clients afterward. Do not initialize again or manually edit journal content, Git history or upload destinations. Valid older display formats upgrade deterministically on subsequent progress, retaining original times/categories/statuses and historical commits.
 
-## 支持范围与限制
+## Support and limitations
 
-当前只支持 Windows，兼容验证环境为 Codex CLI **0.162.0** 和 Claude Code **2.1.295**。作者已在本机使用 Codex 桌面端完成记录，并完成 GitHub／Gitee 双目标同步；这不表示所有客户端版本、安装方式或编辑器入口都已验证。
+This preview is Windows-only. Compatibility development uses Codex CLI **0.162.0** and Claude Code **2.1.295**. The author has observed recording in Codex desktop and real GitHub/Gitee dual-destination synchronization on their computer. This does not qualify every client version, installation layout or editor entry.
 
-- Codex 注册器先识别 `%LOCALAPPDATA%/Programs/OpenAI/Codex/bin/codex.exe`，否则识别 `%APPDATA%/npm/node_modules/@openai/codex` 中明确的 `bin/codex.js` 入口。读取 `CODEX_HOME`，否则使用 `~/.codex`，合并 `hooks.json` 和 `config.toml`。其他独立安装器或自定义 npm 前缀尚不支持。
-- Claude 注册器识别标准全局 npm 目录 `%APPDATA%/npm/node_modules/@anthropic-ai/claude-code` 中明确的 `cli.js` 或 `bin/claude.exe` 入口。读取 `CLAUDE_CONFIG_DIR`，否则使用 `~/.claude` 的 `settings.json` 与 `~/.claude.json`；自定义目录使用其中的 `.claude.json`。
-- 编辑器扩展只有在共享受支持配置、提供所需原生事件和 MCP 字段时才可记录；Claude Code VS Code 入口仍需使用者本机复测。Codex IDE、其他 AI 工具、macOS／Linux、Claude 的其他安装位置及 Cowork／staging 配置不在这版保证范围内。
-- 缺少原生会话／轮次 ID、不成功的工具返回、未知包装格式都会拒绝记录，不回读对话补全。安装状态显示 `configured_unverified`，代表已配置，需要你做本机试用。
-- 不提供对话索引、项目代码备份、自由文本摘要、自动补写漏记对话。GitHub 等平台是否显示贡献由其自身规则决定。
+- Codex registration first recognizes `%LOCALAPPDATA%/Programs/OpenAI/Codex/bin/codex.exe`, otherwise the exact `bin/codex.js` entry in `%APPDATA%/npm/node_modules/@openai/codex`. Other standalone installer layouts or custom npm prefixes are unsupported. Configuration uses `CODEX_HOME`, or `~/.codex`, merging `hooks.json` and `config.toml`.
+- Claude registration recognizes exact `cli.js` or `bin/claude.exe` entries in `%APPDATA%/npm/node_modules/@anthropic-ai/claude-code`. Configuration uses `CLAUDE_CONFIG_DIR`, or `~/.claude/settings.json` and `~/.claude.json`; a custom directory uses its `.claude.json`.
+- Editor extensions require shared supported configuration and the expected native event/MCP fields. Claude Code VS Code still requires a local user test. Codex IDE, other AI tools, macOS/Linux, other Claude installation layouts, and Cowork/staging profiles are outside this preview's supported scope.
+- Missing native session/turn IDs, failed results and unknown result wrappers fail closed. There is no transcript fallback. Integration status `configured_unverified` means configuration was installed and a local client test is required.
+- There is no chat lookup, work project backup, free-text summary, or automatic backfill of missed chats. Contribution graph display depends on the Git host's own rules.
 
-## 排障与审查
+## Troubleshooting and audit
 
-没有记录时先检查 `status` 的 `captureEnabled`、`queuedCount`、`unclassifiedCount`、`errorCode` 和各目标状态。队列有数据但不处理时，检查后台任务，运行 `start` 或一次 `sync`；队列为空且未分类数增长时，检查客户端是否加载 MCP、许可钩子并调用分类工具。
+Check `captureEnabled`, `queuedCount`, `unclassifiedCount`, `errorCode` and per-target status in `status`. A queue that is not being processed suggests checking the background task, running `start`, or a one-shot `sync`. An empty queue with increasing unclassified turns suggests checking MCP availability, hook permission and classification tool calls in the client.
 
-不要为排障公开原始对话、配置备份、密钥或 token。可报告客户端入口／版本、固定错误码、是否出现分类工具调用以及是否存在日志文件。
+Do not publish raw chats, original configuration backups, secrets or tokens when reporting an issue. Client entry/version, fixed error codes, whether the classification tool appeared, and whether WORKLOG exists are enough to start diagnosis.
 
-项目生产逻辑集中在七个可读模块，所有子进程执行集中于 [`src/transport.ts`](src/transport.ts)：
+Production logic is kept in seven readable modules. All project subprocess execution is in [`src/transport.ts`](src/transport.ts):
 
-| 文件 | 用途 |
+| Module | Responsibility |
 | --- | --- |
-| `schema.ts` | 固定字段、日志格式和上传内容校验 |
-| `mcp.ts` | 只接受类别与状态的分类工具 |
-| `capture.ts` | 原生输入投影与钩子返回 |
-| `store.ts` | 私有队列、状态和锁 |
-| `transport.ts` | Git、凭据配置检查、客户端注册、权限与后台任务 |
-| `publish.ts` | 本地事务、历史审查及目标重试 |
-| `cli.ts` | 初始化和管理命令 |
+| `schema.ts` | Fixed fields, journal formatting and content validation |
+| `mcp.ts` | Category/status classification tool |
+| `capture.ts` | Native event projection and hook output |
+| `store.ts` | Private queue, state and locks |
+| `transport.ts` | Git, credential settings, client registration, ACL and startup |
+| `publish.ts` | Local transactions, history audit and independent retries |
+| `cli.ts` | Initialization and management commands |
 
-后台 GUI 启动器的固定 C# 源码嵌在 `transport.ts`，本地编译时保存为私有目录的 `startup-launcher.cs`，可一并审查。它只负责无窗口启动 Node、等待退出并返回退出码。
+The fixed GUI launcher's C# source is embedded in `transport.ts` and saved locally as `startup-launcher.cs` when compiled. Review it alongside the TypeScript: it only starts Node without a console, waits and returns the exit code.
 
-开发者可从锁文件运行 `npm ci` 和 `npm test`。测试覆盖固定分类、原生 JSON 协议、隐私边界、真实本地 Git、双目标失败恢复和后台启动定义；自动化替身测试不等于所有真实客户端与服务均已验证。
+Contributors can run `npm ci` and `npm test` from a source checkout. Tests cover fixed classifications, native JSON contracts, privacy boundaries, real local Git, dual-target failure recovery and startup definitions. Test doubles do not establish compatibility with every real client or hosting service.
