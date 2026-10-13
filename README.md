@@ -13,7 +13,7 @@ I-m-Genius helps you recognize that work. It gathers progress reported by the AI
 ## Why use it?
 
 - **Lightweight capture.** Native client hooks and a small local worker fit into your existing workflow. The AI already working on your task chooses a fixed category and status; there is no separate AI summarizer.
-- **A small, consistent journal.** Entries contain UTC time, category, status and a daily badge. No conversation body, project name, chat title or free-text summary goes into the journal.
+- **A small, consistent journal.** Entries contain UTC time, category, status and a daily badge. No conversation body, project name, chat title or free-text summary goes into the journal. **I-m-Genius promises not to save or upload conversation content or the private information it contains anywhere.** If you still have concerns, you can quickly verify this in the [lightweight, readable source code](src).
 - **Local first, sharing by choice.** A local queue feeds `WORKLOG.md` and real Git commits. Journal upload starts only after you explicitly enable it.
 - **History you can inspect.** Preview the full journal, changes and Git identity. Audited history can go to one HTTPS Git repository and one optional mirror, with independent retries for each destination.
 
