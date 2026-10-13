@@ -2,9 +2,34 @@
 
 [中文](README.md) · [Privacy and data boundaries](PRIVACY.md) · [MIT License](LICENSE)
 
-Collect development progress from Codex and Claude Code in one Markdown journal. Keep a daily record without publishing your working projects' code.
+**Your work with AI deserves a record.**
 
-**Windows preview.** Native hooks receive events, the AI working on the task chooses a fixed category and status, and a local worker appends to `WORKLOG.md` and creates real Git commits. Upload is optional: enable one HTTPS journal repository and, optionally, one mirror.
+Research, planning, long conversations and debugging all take effort. Much of it never becomes a shipped feature or a repository: small experiments may stay unversioned, private projects may stay off public hosts, and work can be spread across tools and hosting platforms. A contribution graph captures only part of that story.
+
+I-m-Genius helps you recognize that work. It gathers progress reported by the AI into one local Markdown journal with real Git history, so you can look back on the effort you put in without publishing your working projects' code.
+
+**v0.1.0 is a Windows preview for Codex and Claude Code.** Recording depends on the AI making a valid classification call; an entry for every conversation is not guaranteed.
+
+## Why use it?
+
+- **Lightweight capture.** Native client hooks and a small local worker fit into your existing workflow. The AI already working on your task chooses a fixed category and status; there is no separate AI summarizer.
+- **A small, consistent journal.** Entries contain UTC time, category, status and a daily badge. No conversation body, project name, chat title or free-text summary goes into the journal.
+- **Local first, sharing by choice.** A local queue feeds `WORKLOG.md` and real Git commits. Journal upload starts only after you explicitly enable it.
+- **History you can inspect.** Preview the full journal, changes and Git identity. Audited history can go to one HTTPS Git repository and one optional mirror, with independent retries for each destination.
+
+## How it works
+
+```mermaid
+flowchart TD
+    H[Native hooks supply a classification prompt] --> A[Current AI: fixed category and status]
+    A --> V[Native PostToolUse event: validate and project]
+    V --> J[Local queue → WORKLOG.md + local Git]
+    J -->|enable-sync| G[HTTPS repository + optional mirror]
+```
+
+Hooks can briefly receive raw prompt text; capture discards it and never opens transcript files. Original client configuration backups stay local and may contain sensitive settings. **Git upload also sends names, email addresses, times and other metadata; a public journal exposes them.** These limits are not an absolute privacy or security guarantee. Read [PRIVACY.md](PRIVACY.md) before enabling upload.
+
+A journal entry looks like this:
 
 | 时间（UTC） | 类别 | 状态 | 进度 |
 | --- | --- | --- | --- |
