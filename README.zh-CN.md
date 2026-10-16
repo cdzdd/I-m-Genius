@@ -6,7 +6,7 @@
 
 I-m-Genius 是一个轻量、自动、可审查的 AI 工作日志工具。把 Codex、Claude Code 中的开发进展汇总到一个 `WORKLOG.md`，用每日计数和成就称号回顾你与 AI 推进工作的过程。无需为每个小项目建立仓库，也无需上传项目代码或对话正文。
 
-**当前为 Windows 预览版，接入 Codex 和 Claude Code。** [开始安装](#安装前准备) · [了解记录链路](#记录链路清晰可见)
+**v0.2.0 为 Windows x64 预览版，接入 Codex 和 Claude Code。** [快速安装](#快速安装windows-x64) · [从源码安装](#1-下载并构建) · [了解记录链路](#记录链路清晰可见)
 
 ## 提交记录之外，还有很多努力
 
@@ -26,7 +26,7 @@ I-m-Genius 为这些过程留下简洁、可回顾的进展记录。调研、方
 | --- | --- |
 | 对话正文不保存、不上传 | 不扫描历史对话文件；原始对话、工具输出和项目路径不会写入进展队列或日志仓库。**本项目承诺不会在任何地方保存或上传对话的具体内容及其中的隐私信息；**若仍有疑虑，可在[轻量、可读的源码](src)中快速核查。 |
 | 原生钩子 + 固定字段 | 由当前工作的 AI 选择预定义类别与状态；没有可把对话带出去的自由文本摘要字段。 |
-| 轻量、方便审查 | 生产逻辑集中在七个可读模块，无需额外接入 AI 摘要服务；联网和子进程入口集中在一个文件中。 |
+| 轻量、方便审查 | 运行时生产逻辑集中在七个可读模块，无需额外接入 AI 摘要服务；运行时联网和子进程入口集中在一个文件中。 |
 | 配置后后台记录 | 原生事件捕获后，本地后台约每分钟处理一次；有效分类自动追加到同一个 Markdown 日志，减少手工整理。 |
 | 同步由你开启 | 默认只在本地记录，上传前可预览完整内容；开启后可同步到一个日志仓库及一个镜像，例如 GitHub + Gitee。 |
 
@@ -55,12 +55,37 @@ flowchart TD
 
 这里的 `N commit!` 计数是**当天新增的状态记录数**。后台约每分钟处理一批，多条状态可能合为一个真实 Git 提交；它不是 Git 提交数量，也不衡量代码质量或工作时长。`AI报告完成` 是 AI 的声明。
 
-## 安装前准备
+## 快速安装（Windows x64）
+
+1. 在 [v0.2.0 发布页](https://github.com/cdzdd/I-m-Genius/releases/tag/v0.2.0) 下载 **`I-m-Genius-0.2.0-windows-x64.zip`**，选择**全部解压缩**，再双击解压目录中的 **`Install.cmd`**。Windows 可能对未签名的下载显示警告。
+2. 向导自动检测受支持的 Codex／Claude Code 安装。至少选择一个要接入的客户端，检查自动填入且可修改的 Git 姓名、邮箱，填写**新建、独立、空的 HTTPS 日志仓库**及可选的空镜像。未检测到受支持客户端时，Install 按钮不可用。不要使用本项目源码仓库或工作项目仓库；不要在表单或 URL 中输入密码或 token。
+3. 默认只在本地记录。保留 **Enable automatic upload (opens Git authentication)** 复选框未选中即可先试用；明确勾选才授权后续上传。Git 的正常凭据助手可能打开浏览器或登录提示，安装器没有 token 输入框。
+4. 重启／重新加载 AI 客户端，在客户端正常流程中确认 MCP／工作区信任和钩子许可。在新对话中完成一个小任务，再查看状态与日志。记录依赖 AI 的有效分类调用，不能保证每个对话都有记录。
+
+ZIP 已包含 Node.js **22.23.3** 和锁定版本的生产依赖；使用者无需安装 Node/npm、构建项目或编译后台启动器。仍需 Git for Windows，路径为 `C:/Program Files/Git/cmd/git.exe`。缺少 Git 时，向导提供 **Download Git** 按钮，打开 [Git 官方下载页](https://git-scm.com/downloads/win)；安装 Git 后重新运行向导。需要 Windows PowerShell **5.1**、WinForms 和系统 .NET Framework。安装 I-m-Genius 无需管理员权限。
+
+`Install.cmd` 仅对本次 PowerShell 进程使用 `ExecutionPolicy Bypass`，不永久更改执行策略，也不能绕过组织策略。安装脚本可直接阅读；预检检查前提条件、普通文件和随包 SHA-256，遇到未知的现有程序／数据目录或冲突钩子时拒绝覆盖。哈希清单用于发现损坏，**不是数字签名**，无法认证与清单一起被修改的压缩包。
+
+程序固定安装到 `%LOCALAPPDATA%/Programs/I-m-Genius`，其中 `payload/node.exe` 和 `payload/app` 分别保存 Node 和应用；私有数据默认位于 `%LOCALAPPDATA%/WhatIveDone`。钩子与后台任务始终指向永久副本，不使用临时解压路径。向导将 CLI 返回的实际 **`configPath`** 保存到程序目录 **`install-receipt.json`**：Windows 打包应用的文件重定向可能使实际位置不同。**Open journal** 在资源管理器中打开该私有目录；后续通过 CLI 管理时，请使用保存的实际路径。安装后不要移动程序或数据目录。
+
+初始化成功后，可从 Windows 开始菜单的 **I-m-Genius** 重新打开已安装的向导，不再需要下载 ZIP 的解压目录。如果 Windows 阻止创建快捷方式，直接运行 `%LOCALAPPDATA%/Programs/I-m-Genius/Install.cmd` 即可。
+
+重新打开已完成的本地安装后，可明确勾选自动上传并点击 **Enable upload**。现有仓库、镜像和 Git 身份为只读，不会再次复制、初始化或添加新镜像。如果初始化后的上传启用失败，本地记录继续工作，仍为本地模式时可通过 **Retry upload** 重试。已开启自动上传的安装可打开日志目录。向导不会卸载用户数据。这版不承诺原地升级或复制／初始化部分失败后的自动修复，此时会停止并要求人工检查。下方完整源码步骤适用于选择从源码安装的使用者。
+
+ZIP 安装后使用下方命令示例时，将 `node .\dist\src\cli.js` 替换为以下程序前缀，并将 `$config` 设为保存的实际路径：
+
+```powershell
+& "$env:LOCALAPPDATA/Programs/I-m-Genius/payload/node.exe" "$env:LOCALAPPDATA/Programs/I-m-Genius/payload/app/dist/src/cli.js" status --config $config
+```
+
+开启上传前请阅读 [隐私与数据边界](PRIVACY.md)。Git 会发送配置的姓名、邮箱及提交元数据；日志仍使用上方示例中的中文标签和 UTC 时间。
+
+## 源码安装前准备
 
 - Windows x64、Node.js 和 npm、Git for Windows。开发验证环境为 Node.js **22.14.0**、Git **2.49.0.windows.1**；其他环境尚未完整验证。
 - Git 必须位于 `C:/Program Files/Git/cmd/git.exe`。这版不从任意 PATH 中选择 Git。
 - 要接入的 Codex 和／或 Claude Code 已安装、登录并能正常使用。具体安装位置和兼容范围见[下方说明](#支持范围与限制)。
-- 默认后台启动需要系统自带的 `%SystemRoot%/Microsoft.NET/Framework64/v4.0.30319/csc.exe`，用于在本机编译一个小启动器；不下载启动器。缺少此文件时可以选择手动模式。
+- 源码安装的默认后台启动需要系统自带的 `%SystemRoot%/Microsoft.NET/Framework64/v4.0.30319/csc.exe`，用于在本机编译一个小启动器；不下载启动器。缺少此文件时可以选择手动模式。预构建 ZIP 已包含启动器。
 - 在 GitHub、Gitee、GitLab 等服务中，**新建独立的空日志仓库**：不要初始化 README、许可证或 `.gitignore`。可选择私有仓库。可选镜像也必须为空，且 URL 与主仓库不同。
 
 **本仓库 `cdzdd/I-m-Genius` 是项目源码仓库。不要将它或你的工作项目用作日志目标。** 当前版本只支持新建空日志仓库、一个写入设备和固定 `main` 分支，不导入已有项目或已有日志历史。
@@ -135,6 +160,8 @@ node .\dist\src\cli.js enable-sync --config $config --mirror https://gitee.com/Y
 
 `enable-sync` 会显示目标、分支和 Git 身份，联网检查所有目标为空，再保存未来批次的上传授权。此后无需逐条确认；后台会把同一份审核过的历史上传到两处。一处断网或认证失败时独立重试，不影响本地记录和另一处；不强制推送。仓库出现未知历史或内容被手动修改时，会拒绝上传并显示固定错误。
 
+首次认证需要浏览器或提示时，可明确执行 `enable-sync --config $config --interactive-auth`（首次启用镜像时同时提供 `--mirror`）。仅允许白名单内的标准 Git 凭据助手交互；普通后台处理仍不交互。助手可能联系日志主机之外的认证服务；不要把凭据粘贴到安装器、URL 或对话中。
+
 源码仓库和日志仓库相互独立；工作项目文件、原始对话、应用配置备份不会加入日志仓库。**实际上传还包含 Git 作者／提交者姓名、邮箱、时间、固定提交信息及 Git 对象元数据**，详情见 [PRIVACY.md](PRIVACY.md)。
 
 ## 每日计数
@@ -170,7 +197,7 @@ node .\dist\src\cli.js uninstall --config $config
 - `start` 启动已安装的后台任务；已运行时不会创建第二个记录进程。手动模式请使用 `sync --watch`。
 - `uninstall` 关闭捕获，移除匹配的本项目钩子、MCP 注册和登录任务，**保留日志、配置和备份**；对已被别人修改的注册不会盲目删除。不要在卸载前改变 `CODEX_HOME` 或 `CLAUDE_CONFIG_DIR`。
 
-升级时先暂停，保持原目录更新源码和构建：
+**源码安装**升级时先暂停，保持原目录更新源码和构建：
 
 ```powershell
 node .\dist\src\cli.js pause --config $config
@@ -204,7 +231,7 @@ node .\dist\src\cli.js start --config $config
 
 不要为排障公开原始对话、配置备份、密钥或 token。可报告客户端入口／版本、固定错误码、是否出现分类工具调用以及是否存在日志文件。
 
-项目生产逻辑集中在七个可读模块，所有子进程执行集中于 [`src/transport.ts`](src/transport.ts)：
+项目运行时生产逻辑集中在七个可读模块，运行时子进程执行集中于 [`src/transport.ts`](src/transport.ts)：
 
 | 文件 | 用途 |
 | --- | --- |
@@ -216,6 +243,6 @@ node .\dist\src\cli.js start --config $config
 | `publish.ts` | 本地事务、历史审查及目标重试 |
 | `cli.ts` | 初始化和管理命令 |
 
-后台 GUI 启动器的固定 C# 源码嵌在 `transport.ts`，本地编译时保存为私有目录的 `startup-launcher.cs`，可一并审查。它只负责无窗口启动 Node、等待退出并返回退出码。
+后台 GUI 启动器的固定 C# 源码嵌在 `transport.ts`，本地编译时保存为私有目录的 `startup-launcher.cs`，可一并审查。它只负责无窗口启动 Node、等待退出并返回退出码。ZIP 的 PowerShell／命令安装脚本同样可直接阅读，其本地安装工作独立于运行时的七个模块。官方 Node 的固定哈希版本及锁定的 npm 依赖在打包阶段下载，使用者安装时使用随包副本。
 
 开发者可从锁文件运行 `npm ci` 和 `npm test`。测试覆盖固定分类、原生 JSON 协议、隐私边界、真实本地 Git、双目标失败恢复和后台启动定义；自动化替身测试不等于所有真实客户端与服务均已验证。

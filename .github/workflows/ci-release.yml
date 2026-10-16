@@ -20,7 +20,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
-          node-version: '22.14.0'
+          node-version: '22.23.3'
       - run: npm ci
       - run: npm test
       - name: Package the tested tag and exact dependency lock
@@ -33,7 +33,9 @@ jobs:
           $packed = npm pack --json --pack-destination release | ConvertFrom-Json
           if ($LASTEXITCODE -ne 0) { throw 'npm pack failed' }
           Copy-Item -LiteralPath package-lock.json -Destination release/package-lock.json
-          $files = @($packed[0].filename, 'package-lock.json')
+          ./scripts/build-windows.ps1 -OutputDirectory release
+          if ($LASTEXITCODE -ne 0) { throw 'Windows bundle failed' }
+          $files = @($packed[0].filename, 'package-lock.json', "I-m-Genius-$($package.version)-windows-x64.zip")
           $sums = foreach ($file in $files) { "$((Get-FileHash -LiteralPath (Join-Path release $file) -Algorithm SHA256).Hash.ToLowerInvariant())  $file" }
           [IO.File]::WriteAllText((Join-Path $PWD release/SHA256SUMS), ($sums -join "`n") + "`n", [Text.UTF8Encoding]::new($false))
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
@@ -42,6 +44,7 @@ jobs:
           name: release-files
           path: |
             release/*.tgz
+            release/*.zip
             release/package-lock.json
             release/SHA256SUMS
           if-no-files-found: error
@@ -57,12 +60,12 @@ jobs:
     steps:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
-          node-version: '22.14.0'
+          node-version: '22.23.3'
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
           name: release-files
           path: release
-      - name: Publish prerelease with the three reviewed asset types
+      - name: Publish prerelease with reviewed source and Windows bundles
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
@@ -78,7 +81,7 @@ jobs:
             return response.json();
           }
           const tag = process.env.RELEASE_TAG;
-          const files = [`whativedone-${tag.slice(1)}.tgz`, 'package-lock.json', 'SHA256SUMS'];
+          const files = [`whativedone-${tag.slice(1)}.tgz`, `I-m-Genius-${tag.slice(1)}-windows-x64.zip`, 'package-lock.json', 'SHA256SUMS'];
           const assets = await Promise.all(files.map(async name => ({ name, bytes: await readFile(`release/${name}`) })));
           const release = await request(base, 'POST', JSON.stringify({ tag_name: tag, name: tag, draft: true, prerelease: true, body: 'Windows preview. See README for installation and PRIVACY.md for data boundaries. Verify the package and exact dependency lock against SHA256SUMS.' }));
           for (const { name, bytes } of assets) {

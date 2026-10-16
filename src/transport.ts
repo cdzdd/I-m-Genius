@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process';
-import { mkdir, readFile, writeFile, lstat, readdir, realpath, unlink } from 'node:fs/promises';
+import { mkdir, readFile, writeFile, lstat, readdir, realpath, unlink, copyFile } from 'node:fs/promises';
 import { join, resolve, isAbsolute, dirname } from 'node:path';
 import { createHash, randomBytes } from 'node:crypto';
 import { validateWorklog, isWorklogAppend, type Config, type StoreState, type Snapshot, type PolicyResult, type Receipt, type Source, type CommitView } from './schema.js';
@@ -288,7 +288,7 @@ async function credentials(): Promise<string[]> {
     }
     return ['-c', 'credential.helper=', ...helpers.flatMap(x => ['-c', `credential.helper=${x}`])];
 }
-async function remote(c: Config, all: boolean, assertOwned: (() => void) | undefined, targetUrl: string): Promise<string | null> {
+async function remote(c: Config, all: boolean, assertOwned: (() => void) | undefined, targetUrl: string, interactiveAuth = false): Promise<string | null> {
     target(c, targetUrl);
     await repository(c);
     const auth = await credentials();
@@ -297,11 +297,11 @@ async function remote(c: Config, all: boolean, assertOwned: (() => void) | undef
     };
     assertOwned?.();
     await writeFile(auditPath(c, 'send-manifest', targetUrl), JSON.stringify({
-        operation: 'check_remote', pushUrl: targetUrl, targetRef: receipt.targetRef, credentialHelpers: auth.filter(x => x.startsWith('credential.helper=')), authenticationMayContactOtherServices: true
+        operation: 'check_remote', pushUrl: targetUrl, targetRef: receipt.targetRef, credentialHelpers: auth.filter(x => x.startsWith('credential.helper=')), authenticationMayContactOtherServices: true, interactiveAuth
     }), { mode: 0o600 });
     try {
         assertOwned?.();
-        const output = await git(c, [...auth, 'ls-remote', '--refs', targetUrl, ...(all ? [] : [receipt.targetRef])]);
+        const output = await git(c, [...auth, 'ls-remote', '--refs', targetUrl, ...(all ? [] : [receipt.targetRef])], interactiveAuth ? { GCM_INTERACTIVE: 'always' } : {});
         receipt.result = 'policy_blocked';
         if (!output.trim()) {
             receipt.result = 'ok';
@@ -325,11 +325,11 @@ async function remote(c: Config, all: boolean, assertOwned: (() => void) | undef
     finally {
         receipt.endedAt = new Date().toISOString();
         assertOwned?.();
-        await writeFile(auditPath(c, 'receipt', targetUrl), JSON.stringify(receipt), { mode: 0o600 });
+        await writeFile(auditPath(c, 'receipt', targetUrl), JSON.stringify({ ...receipt, interactiveAuth }), { mode: 0o600 });
     }
 }
-export async function checkEmptyRemote(c: Config, assertOwned?: () => void, targetUrl = c.remoteUrl): Promise<void> {
-    await remote(c, true, assertOwned, targetUrl);
+export async function checkEmptyRemote(c: Config, assertOwned?: () => void, targetUrl = c.remoteUrl, interactiveAuth = false): Promise<void> {
+    await remote(c, true, assertOwned, targetUrl, interactiveAuth);
 }
 export async function refreshRemote(c: Config, assertOwned?: () => void, targetUrl = c.remoteUrl): Promise<{
     oid: string | null;
@@ -358,7 +358,7 @@ export async function pushSnapshot(c: Config, s: Snapshot, assertOwned?: () => v
     const auth = await credentials();
     assertOwned?.();
     await writeFile(auditPath(c, 'send-manifest', s.pushUrl), JSON.stringify({
-        pushUrl: s.pushUrl, targetRef: receipt.targetRef, targetOid: s.targetOid, commitOids: s.commits.map(x => x.oid), credentialHelpers: auth.filter(x => x.startsWith('credential.helper=')), authenticationMayContactOtherServices: true
+        pushUrl: s.pushUrl, targetRef: receipt.targetRef, targetOid: s.targetOid, commitOids: s.commits.map(x => x.oid), credentialHelpers: auth.filter(x => x.startsWith('credential.helper=')), authenticationMayContactOtherServices: true, interactiveAuth: false
     }), { mode: 0o600 });
     await repository(c);
     if (await head(c) !== s.targetOid)
@@ -373,7 +373,7 @@ export async function pushSnapshot(c: Config, s: Snapshot, assertOwned?: () => v
     }
     receipt.endedAt = new Date().toISOString();
     assertOwned?.();
-    await writeFile(auditPath(c, 'receipt', s.pushUrl), JSON.stringify(receipt), { mode: 0o600 });
+    await writeFile(auditPath(c, 'receipt', s.pushUrl), JSON.stringify({ ...receipt, interactiveAuth: false }), { mode: 0o600 });
     return receipt;
 }
 function cli(path: string): void {
@@ -415,6 +415,37 @@ async function codexEntry(): Promise<{ executable: string; prefix: string[] }> {
     } catch {
         fail('invalid_client');
     }
+}
+export async function checkClientAvailable(source: Source): Promise<void> {
+    if (source === 'codex') await codexEntry();
+    else if (source === 'claude') await claudeEntry();
+    else fail('invalid_client');
+}
+export async function setupInfo(): Promise<{ gitAvailable: boolean; codexAvailable: boolean; claudeAvailable: boolean; authorName: string; authorEmail: string }> {
+    const available = async (source: Source) => {
+        try { await checkClientAvailable(source); return true; }
+        catch { return false; }
+    };
+    let gitAvailable = false, authorName = '', authorEmail = '';
+    try {
+        await run(GIT, ['--version']);
+        gitAvailable = true;
+        const env = environment();
+        delete env.GIT_CONFIG_GLOBAL;
+        delete env.GIT_CONFIG_SYSTEM;
+        delete env.GIT_CONFIG_NOSYSTEM;
+        const identity = async (key: string) => {
+            let value = '';
+            for (const scope of ['--system', '--global']) {
+                const found = (await run(GIT, ['config', scope, '--no-includes', '--get', key], env, true)).trim();
+                if (found) value = found;
+            }
+            return /[<>\r\n\x00]/.test(value) ? '' : value;
+        };
+        authorName = await identity('user.name');
+        authorEmail = await identity('user.email');
+    } catch { /* Detection and editable defaults remain usable when Git is absent. */ }
+    return { gitAvailable, codexAvailable: await available('codex'), claudeAvailable: await available('claude'), authorName, authorEmail };
 }
 export async function registerClientMcp(source: Source, absoluteCli: string): Promise<void> {
     cli(absoluteCli);
@@ -479,6 +510,17 @@ export async function manageStartup(operation: 'install' | 'remove' | 'start', a
         if (bytes.length > 16 * 1024)
             fail('invalid_client');
         await safeDirectory(privateDir);
+        const bundledSource = resolve(dirname(absoluteCli), '../..', 'startup-launcher.cs');
+        const bundledLauncher = resolve(dirname(absoluteCli), '../..', 'startup-launcher.exe');
+        const hasBundledSource = await exists(bundledSource), hasBundledLauncher = await exists(bundledLauncher);
+        if (hasBundledSource !== hasBundledLauncher) fail('startup_conflict');
+        if (hasBundledSource) {
+            for (const path of [bundledSource, bundledLauncher]) {
+                if (!(await lstat(path)).isFile() || resolve(await realpath(path)).toLowerCase() !== resolve(path).toLowerCase())
+                    fail('startup_conflict');
+            }
+            if (await readFile(bundledSource, 'utf8') !== STARTUP_LAUNCHER) fail('startup_conflict');
+        }
         if (await exists(source)) {
             if (!(await lstat(source)).isFile() || (await lstat(source)).isSymbolicLink() || await readFile(source, 'utf8') !== STARTUP_LAUNCHER)
                 fail('startup_conflict');
@@ -487,8 +529,13 @@ export async function manageStartup(operation: 'install' | 'remove' | 'start', a
             await writeFile(source, STARTUP_LAUNCHER, { mode: 0o600, flag: 'wx' });
         if (await exists(launcher) && (!(await lstat(launcher)).isFile() || (await lstat(launcher)).isSymbolicLink()))
             fail('startup_conflict');
-        const framework = join(process.env.SystemRoot || 'C:/Windows', 'Microsoft.NET', 'Framework64', 'v4.0.30319');
-        await run(join(framework, 'csc.exe'), ['/noconfig', '/nologo', '/target:winexe', '/nostdlib', `/reference:${join(framework, 'mscorlib.dll')}`, `/reference:${join(framework, 'System.dll')}`, `/out:${launcher}`, source], environment(), false, true);
+        if (hasBundledSource) {
+            await copyFile(bundledSource, source);
+            await copyFile(bundledLauncher, launcher);
+        } else {
+            const framework = join(process.env.SystemRoot || 'C:/Windows', 'Microsoft.NET', 'Framework64', 'v4.0.30319');
+            await run(join(framework, 'csc.exe'), ['/noconfig', '/nologo', '/target:winexe', '/nostdlib', `/reference:${join(framework, 'mscorlib.dll')}`, `/reference:${join(framework, 'System.dll')}`, `/out:${launcher}`, source], environment(), false, true);
+        }
         const temporary = join(privateDir, `.startup-${randomBytes(8).toString('hex')}.xml`);
         await writeFile(temporary, bytes, { mode: 0o600, flag: 'wx' });
         try {

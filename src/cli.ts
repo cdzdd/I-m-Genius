@@ -10,7 +10,7 @@ import { type Config, type Source } from './schema.js';
 import { handleCommandHook } from './capture.js';
 import { runMcp } from './mcp.js';
 import { readEvents, readState, writeState, withWriterLock } from './store.js';
-import { initializeLocalRepository, manageStartup, registerClientMcp, removeClientMcp, securePrivateDirectory } from './transport.js';
+import { initializeLocalRepository, manageStartup, registerClientMcp, removeClientMcp, securePrivateDirectory, checkClientAvailable, setupInfo } from './transport.js';
 import { processOnce, preview, previewTargets, enableSync } from './publish.js';
 const absoluteCli = fileURLToPath(import.meta.url);
 const defaultPath = () => join(process.env.LOCALAPPDATA || join(homedir(), 'AppData', 'Local'), 'WhatIveDone', 'config.json');
@@ -98,11 +98,12 @@ async function currentServer(source: Source, path: string): Promise<unknown> {
         throw new Error('invalid_client');
     }
 }
-async function installSource(c: Config, source: Source, configPath: string): Promise<InstalledSource> {
+async function prepareSource(source: Source, configPath: string) {
     const paths = await sourcePaths(source);
     const command = hookCommand(source, configPath);
     if (await currentServer(source, paths.mcp) !== undefined)
         throw new Error('client_conflict');
+    await checkClientAvailable(source);
     const config = await json(paths.hooks, {});
     if (!config || typeof config !== 'object' || Array.isArray(config) || config.hooks && (typeof config.hooks !== 'object' || Array.isArray(config.hooks)))
         throw new Error('invalid_client');
@@ -112,6 +113,10 @@ async function installSource(c: Config, source: Source, configPath: string): Pro
             throw new Error('invalid_client');
         blocks[event] = { ...(event === 'PostToolUse' ? { matcher: 'mcp__whativedone__classify_progress' } : {}), hooks: [{ type: 'command', command, ...(source === 'claude' ? { shell: 'powershell' } : {}) }] };
     }
+    return { paths, config, blocks };
+}
+async function installSource(c: Config, source: Source, configPath: string): Promise<InstalledSource> {
+    const { paths, config, blocks } = await prepareSource(source, configPath);
     // Backups can contain source-app configuration; keep them only in the protected directory.
     for (const [kind, path] of Object.entries(paths)) {
         try {
@@ -137,6 +142,26 @@ async function installSource(c: Config, source: Source, configPath: string): Pro
     await mkdir(dirname(paths.hooks), { recursive: true });
     await save(paths.hooks, config);
     return installed;
+}
+async function setupCheck(options: Record<string, string>, sources: Source[], configPath: string): Promise<void> {
+    if (!options['--repo'] || !options['--name'] || !options['--email'])
+        throw new Error('invalid_arguments');
+    if (!validRepoUrl(options['--repo']) || options['--mirror'] === options['--repo'] || /[<>\r\n\x00]/.test(options['--name'] + options['--email']))
+        throw new Error('invalid_config');
+    try {
+        await access(configPath);
+        throw new Error('already_initialized');
+    } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    }
+    const privateDir = dirname(configPath);
+    try {
+        if ((await lstat(privateDir)).isSymbolicLink()) throw new Error('invalid_history');
+        if ((await readdir(privateDir)).length) throw new Error('private_directory_not_empty');
+    } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    }
+    for (const native of new Set(sources)) await prepareSource(native, configPath);
 }
 async function uninstall(c: Config, configPath: string): Promise<void> {
     const ledger: InstalledSource[] = await json(join(c.privateDir, 'integrations.json'), []);
@@ -169,7 +194,10 @@ export async function runCli(args: string[], input: AsyncIterable<Uint8Array> = 
         const options: Record<string, string> = {};
         const sources: Source[] = [];
         let source: Source | undefined;
-        let noStartup = false, watch = false;
+        let noStartup = false, watch = false, interactiveAuth = false;
+        const setupCommand = command === 'init' || command === 'setup-check';
+        if (!['setup-info', 'setup-check', 'init', 'hook', 'start', 'sync', 'preview', 'status', 'enable-sync', 'pause', 'resume', 'uninstall'].includes(command))
+            throw new Error('invalid_arguments');
         for (let i = 1; i < args.length; i++) {
             const arg = args[i];
             if (command === 'hook' && i === 1 && ['codex', 'claude'].includes(arg)) {
@@ -177,14 +205,23 @@ export async function runCli(args: string[], input: AsyncIterable<Uint8Array> = 
                 continue;
             }
             if (arg === '--no-startup') {
+                if (command !== 'init' || noStartup) throw new Error('invalid_arguments');
                 noStartup = true;
                 continue;
             }
             if (arg === '--watch') {
+                if (command !== 'sync' || watch) throw new Error('invalid_arguments');
                 watch = true;
                 continue;
             }
+            if (arg === '--interactive-auth') {
+                if (command !== 'enable-sync' || interactiveAuth) throw new Error('invalid_arguments');
+                interactiveAuth = true;
+                continue;
+            }
             if (!['--config', '--repo', '--mirror', '--name', '--email', '--source'].includes(arg) || !args[i + 1] || args[i + 1].startsWith('--'))
+                throw new Error('invalid_arguments');
+            if (command === 'setup-info' || arg !== '--config' && !(setupCommand || command === 'enable-sync' && arg === '--mirror'))
                 throw new Error('invalid_arguments');
             const value = args[++i];
             if (arg === '--source') {
@@ -198,35 +235,25 @@ export async function runCli(args: string[], input: AsyncIterable<Uint8Array> = 
                 options[arg] = value;
             }
         }
-        if (options['--mirror'] !== undefined && !['init', 'enable-sync'].includes(command))
+        if (command === 'hook' && !source) throw new Error('invalid_arguments');
+        if (options['--mirror'] !== undefined && !['init', 'setup-check', 'enable-sync'].includes(command))
             throw new Error('invalid_arguments');
         if (options['--mirror'] !== undefined && !validRepoUrl(options['--mirror']))
             throw new Error('invalid_config');
+        if (command === 'setup-info') {
+            output(JSON.stringify(await setupInfo()));
+            return 0;
+        }
         let configPath = resolve(options['--config'] || defaultPath());
+        if (setupCommand) {
+            await setupCheck(options, sources, configPath);
+            if (command === 'setup-check') {
+                output(JSON.stringify({ ready: true }));
+                return 0;
+            }
+        }
         if (command === 'init') {
-            if (!options['--repo'] || !options['--name'] || !options['--email'])
-                throw new Error('invalid_arguments');
-            if (options['--mirror'] === options['--repo'])
-                throw new Error('invalid_config');
-            try {
-                await access(configPath);
-                throw new Error('already_initialized');
-            }
-            catch (error) {
-                if ((error as NodeJS.ErrnoException).code !== 'ENOENT')
-                    throw error;
-            }
             let privateDir = dirname(configPath);
-            try {
-                if ((await lstat(privateDir)).isSymbolicLink())
-                    throw new Error('invalid_history');
-                if ((await readdir(privateDir)).length)
-                    throw new Error('private_directory_not_empty');
-            }
-            catch (error) {
-                if ((error as NodeJS.ErrnoException).code !== 'ENOENT')
-                    throw error;
-            }
             await mkdir(privateDir, { recursive: true });
             if ((await lstat(privateDir)).isSymbolicLink())
                 throw new Error('invalid_history');
@@ -310,7 +337,7 @@ export async function runCli(args: string[], input: AsyncIterable<Uint8Array> = 
         }
         else if (command === 'enable-sync') {
             output(JSON.stringify({ target: c.remoteUrl, targets: [c.remoteUrl, ...(c.mirrorUrl ? [c.mirrorUrl] : [])].map(url => ({ url })), branch: c.branch, authorName: c.authorName, authorEmail: c.authorEmail, authorization: 'Future rule-based sends; this does not mean each entry was manually approved.' }));
-            await enableSync(c);
+            await enableSync(c, interactiveAuth);
             await save(configPath, c);
             output('auto');
         }

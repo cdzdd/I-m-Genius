@@ -258,11 +258,11 @@ export async function processOnce(c: Config): Promise<SyncResult> {
         }
     });
 }
-export async function enableSync(c: Config): Promise<void> {
+export async function enableSync(c: Config, interactiveAuth = false): Promise<void> {
     await withWriterLock(c.privateDir, async (check) => {
-        await checkEmptyRemote(c, check);
+        await checkEmptyRemote(c, check, c.remoteUrl, interactiveAuth);
         if (c.mirrorUrl)
-            await checkEmptyRemote(c, check, c.mirrorUrl);
+            await checkEmptyRemote(c, check, c.mirrorUrl, interactiveAuth);
         if (await readLocalHeadOid(c))
             await preview(c);
         const state = await readState(c.privateDir);

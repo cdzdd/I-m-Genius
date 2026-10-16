@@ -8,7 +8,7 @@ Research, planning, long conversations and debugging all take effort. Much of it
 
 I-m-Genius helps you recognize that work. It gathers progress reported by the AI into one local Markdown journal with real Git history, so you can look back on the effort you put in without publishing your working projects' code.
 
-**v0.1.0 is a Windows preview for Codex and Claude Code.** Recording depends on the AI making a valid classification call; an entry for every conversation is not guaranteed.
+**v0.2.0 is a Windows x64 preview for Codex and Claude Code.** [Quick install](#quick-install-windows-x64) · [Build from source](#1-clone-and-build). Recording depends on the AI making a valid classification call; an entry for every conversation is not guaranteed.
 
 ## Why use it?
 
@@ -38,12 +38,37 @@ A journal entry looks like this:
 
 The current journal headings and category/status labels are Chinese. `N commit!` counts **new state rows on that UTC date**, not Git commits. Several rows processed in one batch can share a real Git commit. The count does not measure code quality or hours worked. “AI报告完成” means the AI reports completion.
 
-## Requirements
+## Quick install (Windows x64)
+
+1. Download **`I-m-Genius-0.2.0-windows-x64.zip`** from the [v0.2.0 release](https://github.com/cdzdd/I-m-Genius/releases/tag/v0.2.0), choose **Extract All**, then double-click **`Install.cmd`** in the extracted folder. Windows may warn about an unsigned download.
+2. The wizard detects supported Codex / Claude Code installations. Select at least one client to connect, review the prefilled Git name and email, and enter a **new, separate, empty HTTPS journal repository** and optional empty mirror. Install is disabled when no supported client is detected. Never enter a password or token in the form or URL. Do not use this project's source repository or a work project as the journal destination.
+3. Local recording is the default. Leave **Enable automatic upload (opens Git authentication)** unchecked to try it locally, or explicitly select it to authorize future journal uploads. Git's normal credential helper may then open a browser or prompt for authentication; the installer has no token field.
+4. Restart/reload your AI clients and confirm their normal MCP/workspace trust and hook permissions. Complete a small task in a new chat, then inspect status and the journal. Recording depends on a valid AI classification call and cannot guarantee an entry for every conversation.
+
+The ZIP bundles Node.js **22.23.3** and locked production dependencies. You do not need to install Node/npm, run a build, or compile a startup launcher. Git for Windows is still required at `C:/Program Files/Git/cmd/git.exe`; if missing, the wizard offers **Download Git**, opening the [official Git for Windows download page](https://git-scm.com/downloads/win). Install Git, then rerun the installer. Windows PowerShell **5.1**, WinForms and the system .NET Framework are required. No administrator privileges are required for I-m-Genius.
+
+`Install.cmd` uses `ExecutionPolicy Bypass` only for its PowerShell process; it does not persistently change execution policy or override organizational policy. The readable installer scripts check prerequisites, regular files and bundled SHA-256 hashes, and refuse unknown existing program/data directories or conflicting hooks. The hash manifest detects corruption; it is not a cryptographic signature and cannot authenticate a modified archive together with its manifest.
+
+The permanent program directory is `%LOCALAPPDATA%/Programs/I-m-Genius` (`payload/node.exe` and `payload/app`); private data defaults to `%LOCALAPPDATA%/WhatIveDone`. Hooks and startup use the permanent copy, never the temporary extraction directory. The wizard captures the CLI's exact canonical **`configPath`** in the program directory's **`install-receipt.json`**: Windows packaged-app redirection can change the physical location. **Open journal** opens that private directory in Explorer. For later CLI management, use the saved path. Do not move the installed program or private data.
+
+After successful initialization, open **I-m-Genius** in the Windows Start menu to return to the installed wizard; the extracted ZIP directory is no longer needed. If Windows prevents shortcut creation, run `%LOCALAPPDATA%/Programs/I-m-Genius/Install.cmd` directly.
+
+Reopening a completed local installation lets you explicitly select automatic upload and click **Enable upload**. The existing repository, mirror and Git identity remain read-only; this does not copy or initialize again, or add a new mirror. If requested upload enablement failed after initialization, local recording remains active and **Retry upload** is available while still local. Existing automatic-upload installations let you open the journal directory. The installer does not uninstall your profile. This preview does not promise an in-place upgrade or automatic repair after a partial copy/initialization failure; it stops for manual review. Use the source instructions below only when choosing a source installation.
+
+For later CLI commands with a ZIP installation, replace `node .\dist\src\cli.js` in the source examples with this prefix, and set `$config` to your saved canonical path:
+
+```powershell
+& "$env:LOCALAPPDATA/Programs/I-m-Genius/payload/node.exe" "$env:LOCALAPPDATA/Programs/I-m-Genius/payload/app/dist/src/cli.js" status --config $config
+```
+
+Read [Privacy and data boundaries](PRIVACY.md) before enabling upload. Git uploads include your configured name/email and commit metadata. The journal's existing Chinese labels and UTC times are shown above.
+
+## Source installation requirements
 
 - Windows x64, Node.js with npm, and Git for Windows. The development environment uses Node.js **22.14.0** and Git **2.49.0.windows.1**; other environments have not been fully qualified.
 - Git at `C:/Program Files/Git/cmd/git.exe`. This preview does not choose an arbitrary Git executable from PATH.
 - Codex and/or Claude Code installed, authenticated and working. Supported entry discovery is described [below](#support-and-limitations).
-- Automatic background startup uses the Windows .NET Framework compiler at `%SystemRoot%/Microsoft.NET/Framework64/v4.0.30319/csc.exe`. It builds a small launcher locally, without downloading a launcher. Use manual mode if the compiler is unavailable.
+- Source installation's automatic background startup uses the Windows .NET Framework compiler at `%SystemRoot%/Microsoft.NET/Framework64/v4.0.30319/csc.exe`. It builds a small launcher locally, without downloading a launcher. Use manual mode if the compiler is unavailable. The prebuilt ZIP already includes the launcher.
 - A **new, separate, empty journal repository** on GitHub, Gitee, GitLab or another HTTPS Git host. Do not initialize a README, license or `.gitignore`. A private repository is supported. An optional mirror must also be empty and have a different URL.
 
 **`cdzdd/I-m-Genius` is the project's source repository. Do not use it, or your work project's repository, as the journal destination.** This preview supports a new empty journal, one writing computer, and the fixed `main` branch. It does not import existing project or journal history.
@@ -62,7 +87,7 @@ npm ci
 npm run build
 ```
 
-Installation is from the source checkout; no npm install package is published. `npm ci` downloads the locked dependencies. After installation, keep the source directory, Node executable and private data directory in place: client hooks and the startup task store absolute paths.
+These instructions install from the source checkout; no npm install package is published. `npm ci` downloads the locked dependencies. After installation, keep the source directory, Node executable and private data directory in place: client hooks and the startup task store absolute paths.
 
 ## 2. Initialize and connect the clients
 
@@ -120,6 +145,8 @@ node .\dist\src\cli.js enable-sync --config $config --mirror https://gitee.com/Y
 
 `enable-sync` displays the targets, branch and Git identity, checks every destination is empty, and saves authorization for future rule-based batches. It does not ask for approval per row. Both hosts receive the same audited history. Authentication or network failure at one destination is retried independently and does not block local recording or the healthy destination. Unknown remote history or manual journal changes block publication instead of forcing an overwrite. No force push is used.
 
+If initial authentication needs a browser or prompt, explicitly run `enable-sync --config $config --interactive-auth` (include `--mirror` when needed at first enablement). Only allowlisted normal Git credential helpers may interact; background processing remains noninteractive. Helpers can contact authentication services beyond the journal host. Never paste credentials into the installer, URLs or chat.
+
 The source checkout and journal repository are separate. Work project files, raw conversations and client configuration backups are excluded from the journal repository. **A push also transmits Git author/committer names, email addresses, times, fixed commit messages and Git object metadata.** Read [PRIVACY.md](PRIVACY.md) for the exact boundaries.
 
 ## Daily labels
@@ -155,7 +182,7 @@ node .\dist\src\cli.js uninstall --config $config
 - `start` runs the already installed background task. An active worker is not duplicated. For manual mode, use `sync --watch`.
 - `uninstall` disables capture and removes matching owned hooks, MCP registration and the logon task. It **retains journal history, configuration and backups**. Modified third-party registrations are not blindly removed. Keep `CODEX_HOME` / `CLAUDE_CONFIG_DIR` unchanged until uninstall finishes.
 
-For an upgrade, pause first. Keep all installation paths unchanged and update the source/build:
+For a **source installation** upgrade, pause first. Keep all installation paths unchanged and update the source/build:
 
 ```powershell
 node .\dist\src\cli.js pause --config $config
@@ -189,7 +216,7 @@ Check `captureEnabled`, `queuedCount`, `unclassifiedCount`, `errorCode` and per-
 
 Do not publish raw chats, original configuration backups, secrets or tokens when reporting an issue. Client entry/version, fixed error codes, whether the classification tool appeared, and whether WORKLOG exists are enough to start diagnosis.
 
-Production logic is kept in seven readable modules. All project subprocess execution is in [`src/transport.ts`](src/transport.ts):
+Runtime production logic is kept in seven readable modules. Runtime subprocess execution is in [`src/transport.ts`](src/transport.ts):
 
 | Module | Responsibility |
 | --- | --- |
@@ -201,6 +228,6 @@ Production logic is kept in seven readable modules. All project subprocess execu
 | `publish.ts` | Local transactions, history audit and independent retries |
 | `cli.ts` | Initialization and management commands |
 
-The fixed GUI launcher's C# source is embedded in `transport.ts` and saved locally as `startup-launcher.cs` when compiled. Review it alongside the TypeScript: it only starts Node without a console, waits and returns the exit code.
+The fixed GUI launcher's C# source is embedded in `transport.ts` and saved locally as `startup-launcher.cs` when compiled. Review it alongside the TypeScript: it only starts Node without a console, waits and returns the exit code. The ZIP's PowerShell/command installer scripts are also readable; their local installation work is separate from the runtime's seven modules. Packaging downloads the official pinned-hash Node release and locked npm dependencies; installed users use the bundled copies.
 
 Contributors can run `npm ci` and `npm test` from a source checkout. Tests cover fixed classifications, native JSON contracts, privacy boundaries, real local Git, dual-target failure recovery and startup definitions. Test doubles do not establish compatibility with every real client or hosting service.
