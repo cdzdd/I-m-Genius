@@ -433,7 +433,7 @@ test('rejects unknown baseline and tampered preview', async () => {
     await append(c);
     const state = await readState(c.privateDir);
     await assert.rejects(readSnapshot(c, { ...state, remoteOid: 'f'.repeat(40) }, 0));
-    const s = await readSnapshot(c, state, 0);
+    const s = structuredClone(await readSnapshot(c, state, 0));
     s.commits[0].worklog = WORKLOG_HEADER + row + row;
     await assert.rejects(pushSnapshot(c, s));
 });
