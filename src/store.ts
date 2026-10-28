@@ -1,9 +1,9 @@
-import { mkdir, open, rename, readFile, readdir, unlink } from 'node:fs/promises';
+import { mkdir, open, rename, readFile, readdir, unlink, lstat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { randomBytes } from 'node:crypto';
 import lockfile from 'proper-lockfile';
 import { AsyncLocalStorage } from 'node:async_hooks';
-import { validateProgress, toPublicRow, type LocalEvent, type StoreState, type Intent, type MirrorState } from './schema.js';
+import { validateProgress, toPublicRow, type LocalEvent, type StoreState, type Intent, type MirrorState, type SyncResult } from './schema.js';
 const keyPattern = /^[a-f0-9]{64}$/;
 const ownership = new AsyncLocalStorage<() => void>();
 function validEvent(event: LocalEvent): boolean {
@@ -163,4 +163,33 @@ export async function writeIntent(privateDir: string, intent: Intent): Promise<v
     await mkdir(privateDir, { recursive: true, mode: 0o700 });
     ownership.getStore()?.();
     await atomicWrite(join(privateDir, 'intent.json'), JSON.stringify(cleanIntent(intent)), ownership.getStore());
+}
+
+export type RunHealth = { startedAt: string; completedAt: string | null; durationMs: number | null; result: SyncResult | 'processing' | 'failed' };
+function cleanRunHealth(value: RunHealth): RunHealth {
+    if (!value || Object.keys(value).sort().join(',') !== 'completedAt,durationMs,result,startedAt' || !value.startedAt || !validCheckedAt(value.startedAt)
+        || !['processing', 'local', 'idle', 'synced', 'pending', 'paused', 'failed'].includes(value.result))
+        throw new Error('invalid_run_health');
+    if (value.result === 'processing' ? value.completedAt !== null || value.durationMs !== null
+        : !value.completedAt || !validCheckedAt(value.completedAt) || value.completedAt < value.startedAt || !Number.isSafeInteger(value.durationMs) || value.durationMs! < 0)
+        throw new Error('invalid_run_health');
+    return { startedAt: value.startedAt, completedAt: value.completedAt, durationMs: value.durationMs, result: value.result };
+}
+export async function readRunHealth(privateDir: string): Promise<RunHealth | null> {
+    const value = await readJson<RunHealth | undefined>(privateDir, 'run-health.json', undefined);
+    return value === undefined ? null : cleanRunHealth(value);
+}
+export async function writeRunHealth(privateDir: string, value: RunHealth): Promise<void> {
+    const clean = cleanRunHealth(value);
+    await atomicWrite(join(privateDir, 'run-health.json'), JSON.stringify(clean));
+}
+export async function readWatcherStatus(privateDir: string): Promise<{ state: 'active' | 'stale' | 'stopped' | 'unknown'; heartbeatAt: string | null }> {
+    try {
+        const lock = await lstat(join(privateDir, 'watcher.lock'));
+        if (!lock.isDirectory() || lock.isSymbolicLink() || !Number.isFinite(lock.mtimeMs) || lock.mtimeMs > Date.now() + 2000)
+            return { state: 'unknown', heartbeatAt: null };
+        return { state: Date.now() - lock.mtimeMs <= 120000 ? 'active' : 'stale', heartbeatAt: lock.mtime.toISOString() };
+    } catch (error) {
+        return { state: (error as NodeJS.ErrnoException).code === 'ENOENT' ? 'stopped' : 'unknown', heartbeatAt: null };
+    }
 }

@@ -63,6 +63,8 @@ I-m-Genius 限制保留与上传的数据，便于使用者审查。它不提供
 
 本地 `receipt.json`、`send-manifest.json` 和镜像对应文件记录操作目标、提交、时间、结果和凭据助手披露，不作为日志文件上传。它们记录的是观察到的 Git 结果，并非托管平台独立签发的密码学回执。发送成功但回执丢失时，后续会先检查远端再重试。
 
+私有的 `run-health.json` 只保留最近一批的开始／结束时间、毫秒耗时和预定义结果。`status` 另外读取锁心跳和最老待处理事件的时间，用于区分处理积压与上传故障。这些诊断信息不包含正文或原始错误，不加入日志 Git 仓库、不上传。
+
 ## 后台启动与审查范围
 
 默认启动任务仅在当前用户登录后运行，使用普通权限。小型 GUI 启动器只负责启动已配置的 Node／CLI／配置文件命令，不显示控制台，等待子进程退出并返回退出码。固定 C# 源码嵌于 `transport.ts`。源码安装时保存在私有目录的 `startup-launcher.cs`，由系统 .NET Framework 编译器本地编译成 `startup-launcher.exe`；ZIP 安装使用随包预构建启动器，无需使用者编译。没有安装时单独下载启动器或上传启动器的操作，相关文件位于日志仓库之外。
@@ -80,6 +82,8 @@ Native hook stdin can include raw conversation text, tool output and paths. The 
 The journal contains UTC time, one of five categories, one of four statuses, and a count-derived daily badge. It has no free-text summary, project name or chat title. **Real Git pushes also transmit author/committer names, emails, times, fixed messages, object IDs, trees and parent relationships**, plus protocol/authentication traffic. A public journal exposes these metadata, including your configured email.
 
 The dedicated profile directory contains the HMAC key, queue/state/transactions, config, receipts, raw original client-setting backups and the journal repository. It receives current-user Windows ACLs; administrators, other user-privileged processes and backups are outside this protection. Original settings backups may contain secrets. Uninstall retains these files and history for inspection.
+
+Private `run-health.json` retains only the latest batch's start/end timestamps, duration in milliseconds and predefined result. Status also reads the watcher lock heartbeat and oldest queued event timestamp. These diagnostics contain no conversation body or raw errors, never enter the journal Git repository and are not uploaded.
 
 `local` and `preview` execute no journal Git network operations. Source installation downloads locked dependencies through npm; client MCP commands and ordinary AI-client use can have separate network behavior. `enable-sync` checks empty HTTPS destinations and authorizes future batches. The worker processes approximately every minute. A primary and optional approved mirror receive the same audited history, with independent checkpoints and retries. Editing configuration or resuming does not authorize a new mirror. There is no all-refs mirror, force push, tag upload or recursive submodule publication.
 

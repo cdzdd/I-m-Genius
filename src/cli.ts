@@ -9,7 +9,7 @@ import lockfile from 'proper-lockfile';
 import { type Config, type Source } from './schema.js';
 import { handleCommandHook } from './capture.js';
 import { runMcp } from './mcp.js';
-import { readEvents, readState, writeState, withWriterLock } from './store.js';
+import { readEvents, readState, writeState, withWriterLock, readRunHealth, writeRunHealth, readWatcherStatus, type RunHealth } from './store.js';
 import { initializeLocalRepository, manageStartup, registerClientMcp, removeClientMcp, securePrivateDirectory, checkClientAvailable, setupInfo } from './transport.js';
 import { processOnce, preview, previewTargets, enableSync } from './publish.js';
 const absoluteCli = fileURLToPath(import.meta.url);
@@ -326,7 +326,22 @@ export async function runCli(args: string[], input: AsyncIterable<Uint8Array> = 
                 do {
                     if (compromised)
                         throw new Error('watcher_lock_lost');
-                    output(await processOnce(await loadConfig(configPath)));
+                    const startedAt = new Date().toISOString();
+                    const report = async (value: RunHealth) => {
+                        try { await writeRunHealth(c.privateDir, value); }
+                        catch { output('diagnostics_unavailable'); }
+                    };
+                    await report({ startedAt, completedAt: null, durationMs: null, result: 'processing' });
+                    try {
+                        const result = await processOnce(await loadConfig(configPath));
+                        const completedAt = new Date().toISOString();
+                        await report({ startedAt, completedAt, durationMs: Math.max(0, Date.parse(completedAt) - Date.parse(startedAt)), result });
+                        output(result);
+                    } catch (error) {
+                        const completedAt = new Date().toISOString();
+                        await report({ startedAt, completedAt, durationMs: Math.max(0, Date.parse(completedAt) - Date.parse(startedAt)), result: 'failed' });
+                        throw error;
+                    }
                     if (watch)
                         await new Promise(resolve => setTimeout(resolve, 60000));
                 } while (watch);
@@ -348,9 +363,13 @@ export async function runCli(args: string[], input: AsyncIterable<Uint8Array> = 
         }
         else if (command === 'status') {
             const state = await readState(c.privateDir);
+            const events = await readEvents(c.privateDir);
+            let lastRun: RunHealth | null = null, runHealthError: 'unavailable' | null = null;
+            try { lastRun = await readRunHealth(c.privateDir); }
+            catch { runHealthError = 'unavailable'; }
             const mirror = state.mirror?.remoteUrl === c.mirrorUrl ? state.mirror : undefined;
             const targets = [{ url: c.remoteUrl, lastSentOid: state.remoteOid, lastCheckedAt: state.remoteCheckedAt, errorCode: state.primaryErrorCode || null }, ...(c.mirrorUrl ? [{ url: c.mirrorUrl, lastSentOid: mirror?.remoteOid || null, lastCheckedAt: mirror?.remoteCheckedAt || null, errorCode: mirror?.errorCode || (c.mode === 'auto' && !mirror ? 'destination_changed' : null) }] : [])];
-            output(JSON.stringify({ mode: c.mode, captureEnabled: c.captureEnabled, target: c.remoteUrl, targets, branch: c.branch, queuedCount: (await readEvents(c.privateDir)).length, unclassifiedCount: state.stoppedTurns.filter(key => !state.classifiedTurns.includes(key)).length, lastSentOid: state.remoteOid, errorCode: state.errorCode || null, sources: (await json(join(c.privateDir, 'integrations.json'), [])).map((item: InstalledSource) => ({ source: item.source, status: item.status })) }));
+            output(JSON.stringify({ mode: c.mode, captureEnabled: c.captureEnabled, target: c.remoteUrl, targets, branch: c.branch, queuedCount: events.length, oldestQueuedAt: events[0]?.recordedAt || null, watcher: await readWatcherStatus(c.privateDir), lastRun, runHealthError, unclassifiedCount: state.stoppedTurns.filter(key => !state.classifiedTurns.includes(key)).length, lastSentOid: state.remoteOid, errorCode: state.errorCode || null, sources: (await json(join(c.privateDir, 'integrations.json'), [])).map((item: InstalledSource) => ({ source: item.source, status: item.status })) }));
         }
         else if (command === 'enable-sync') {
             output(JSON.stringify({ target: c.remoteUrl, targets: [c.remoteUrl, ...(c.mirrorUrl ? [c.mirrorUrl] : [])].map(url => ({ url })), branch: c.branch, authorName: c.authorName, authorEmail: c.authorEmail, authorization: 'Future rule-based sends; this does not mean each entry was manually approved.' }));

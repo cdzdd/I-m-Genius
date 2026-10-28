@@ -119,7 +119,7 @@ node .\dist\src\cli.js init --config $config --repo https://github.com/YOUR_NAME
 
 `I-m-Genius-data` 必须不存在或为空，且应与源码目录分开。命令成功会打印 `configPath`；请将 `$config` 改为**打印出的实际路径**，后续命令继续使用它。Windows 打包应用的文件重定向可能使该路径与输入值不同。不要对已存在的安装重新执行 `init`。
 
-初始模式为 `local`，此时本项目不执行日志仓库的 Git 网络操作。默认安装当前用户的登录启动任务，立即启动无终端窗口的后台处理程序，之后每约 60 秒处理一次队列。它以普通用户权限运行，只有登录后才运行。
+初始模式为 `local`，此时本项目不执行日志仓库的 Git 网络操作。默认安装当前用户的登录启动任务，立即启动无终端窗口的后台处理程序，每批处理完成后等待 60 秒，再处理下一批。处理和联网耗时会额外计入间隔。它以普通用户权限运行，只有登录后才运行。
 
 如果不需要自动后台处理，在初始化命令末尾添加 `--no-startup`，然后在需要记录时保持下面的窗口运行；该窗口关闭后会停止处理，钩子取得的事件仍在本地等待：
 
@@ -227,7 +227,9 @@ node .\dist\src\cli.js start --config $config
 
 ## 排障与审查
 
-没有记录时先检查 `status` 的 `captureEnabled`、`queuedCount`、`unclassifiedCount`、`errorCode` 和各目标状态。队列有数据但不处理时，检查后台任务，运行 `start` 或一次 `sync`；队列为空且未分类数增长时，检查客户端是否加载 MCP、许可钩子并调用分类工具。
+没有记录时先检查 `status` 的 `captureEnabled`、`queuedCount`、`oldestQueuedAt`、`unclassifiedCount`、`errorCode` 和各目标状态。`watcher.state` 中，`active` 表示 120 秒内有锁心跳，`stale` 表示锁心跳过期，`stopped` 表示不存在锁，`unknown` 表示无法检查。新鲜心跳说明后台近期有活动，不是独立的进程健康保证。`lastRun` 显示最近一批的开始／结束时间、毫秒耗时和固定结果；`processing` 表示尚无结束记录。旧配置在使用新版处理第一批前为 `lastRun: null`。诊断文件无法读取或不合法时显示 `runHealthError: "unavailable"`；写入失败会提示固定的 `diagnostics_unavailable`，仍继续处理进展记录。
+
+队列有数据但不处理时，检查心跳和最近处理状态，运行 `start` 或一次 `sync`；队列为空且未分类数增长时，检查客户端是否加载 MCP、许可钩子并调用分类工具。未分类轮次不一定代表漏记了实际工作，不会通过读取对话补造分类。诊断时间和固定结果只保存在私有的 `run-health.json`，不会上传。
 
 不要为排障公开原始对话、配置备份、密钥或 token。可报告客户端入口／版本、固定错误码、是否出现分类工具调用以及是否存在日志文件。
 

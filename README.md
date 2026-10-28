@@ -102,7 +102,7 @@ Remove one `--source` if you only use one client. Initialization merges three ow
 
 The private directory must be absent or empty and separate from the source checkout. Successful initialization prints `configPath`. Set `$config` to that **exact printed path** for all later commands: Windows packaged-app filesystem redirection can change the physical location. Do not rerun `init` on an existing installation.
 
-The initial mode is `local`: this project's journal Git network operations are disabled. By default, initialization installs a current-user logon task and starts the worker immediately without a terminal window. It processes a batch approximately every 60 seconds, runs without elevation, and requires a logged-in user.
+The initial mode is `local`: this project's journal Git network operations are disabled. By default, initialization installs a current-user logon task and starts the worker immediately without a terminal window. It waits 60 seconds after processing each batch, runs without elevation, and requires a logged-in user. Processing and network time add to this interval.
 
 For manual processing, append `--no-startup` to `init`, then keep this command running while you want the journal updated:
 
@@ -212,7 +212,9 @@ This preview is Windows-only. Compatibility development uses Codex CLI **0.162.0
 
 ## Troubleshooting and audit
 
-Check `captureEnabled`, `queuedCount`, `unclassifiedCount`, `errorCode` and per-target status in `status`. A queue that is not being processed suggests checking the background task, running `start`, or a one-shot `sync`. An empty queue with increasing unclassified turns suggests checking MCP availability, hook permission and classification tool calls in the client.
+Check `captureEnabled`, `queuedCount`, `oldestQueuedAt`, `unclassifiedCount`, `errorCode` and per-target status in `status`. `watcher.state` reports `active` for a lock heartbeat seen within 120 seconds, `stale` for an older lock, `stopped` when no lock exists, or `unknown` when it cannot be checked. A fresh heartbeat is evidence of recent worker activity, not an independent process-health guarantee. `lastRun` reports the latest batch's start/end times, duration in milliseconds and fixed result; `processing` has no end time yet. Older profiles have `lastRun: null` until their first run with this version. An unavailable or invalid diagnostic file sets `runHealthError: "unavailable"`; a diagnostic write failure warns `diagnostics_unavailable` without blocking progress processing.
+
+A queue that is not being processed suggests checking the heartbeat and last run, running `start`, or a one-shot `sync`. An empty queue with increasing unclassified turns suggests checking MCP availability, hook permission and classification tool calls in the client. Unclassified turns are not necessarily lost meaningful work and are never reconstructed from conversations. Diagnostic timestamps and fixed results stay in private `run-health.json` and are not uploaded.
 
 Do not publish raw chats, original configuration backups, secrets or tokens when reporting an issue. Client entry/version, fixed error codes, whether the classification tool appeared, and whether WORKLOG exists are enough to start diagnosis.
 
