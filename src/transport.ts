@@ -1,8 +1,9 @@
-import { execFile } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { mkdir, readFile, writeFile, lstat, readdir, realpath, unlink, copyFile } from 'node:fs/promises';
 import { join, resolve, isAbsolute, dirname } from 'node:path';
 import { createHash, randomBytes } from 'node:crypto';
-import { validateWorklog, isWorklogAppend, type Config, type StoreState, type Snapshot, type PolicyResult, type Receipt, type Source, type CommitView } from './schema.js';
+import { validateWorklog, isWorklogAppend, WORKLOG_HEADER, LEGACY_WORKLOG_HEADER, type Config, type StoreState, type Snapshot, type PolicyResult, type Receipt, type Source, type CommitView } from './schema.js';
 const GIT = 'C:/Program Files/Git/cmd/git.exe';
 const OID = /^[a-f0-9]{40}$/;
 const MESSAGE = 'worklog: append progress';
@@ -75,8 +76,8 @@ function run(executable: string, args: string[], env = environment(), missingAll
         });
     });
 }
-function git(c: Config, args: string[], extraEnv: NodeJS.ProcessEnv = {}): Promise<string> {
-    const options = [
+function gitOptions(c: Config): string[] {
+    return [
         '--no-pager', '--no-replace-objects', '--no-lazy-fetch',
         `--git-dir=${join(c.gitDir, '.git')}`, `--work-tree=${c.gitDir}`,
         '-c', `core.hooksPath=${join(c.privateDir, 'empty')}`,
@@ -86,7 +87,9 @@ function git(c: Config, args: string[], extraEnv: NodeJS.ProcessEnv = {}): Promi
         '-c', 'maintenance.auto=false', '-c', 'protocol.allow=never',
         '-c', 'protocol.https.allow=always', '-c', 'http.followRedirects=false'
     ];
-    return run(GIT, [...options, ...args], { ...environment(), ...extraEnv });
+}
+function git(c: Config, args: string[], extraEnv: NodeJS.ProcessEnv = {}): Promise<string> {
+    return run(GIT, [...gitOptions(c), ...args], { ...environment(), ...extraEnv });
 }
 async function exists(path: string): Promise<boolean> {
     try {
@@ -170,35 +173,130 @@ async function head(c: Config): Promise<string> {
         fail();
     return s;
 }
-async function audit(c: Config, target: string): Promise<CommitView[]> {
-    if (!OID.test(target))
-        fail();
-    const ids = (await git(c, ['rev-list', '--reverse', target])).trim().split('\n');
-    const commits: CommitView[] = [];
-    let previous = '';
-    for (const oid of ids) {
-        if (!OID.test(oid))
-            fail();
-        const raw = await git(c, ['cat-file', 'commit', oid]);
-        const match = /^tree ([a-f0-9]{40})\n(?:parent ([a-f0-9]{40})\n)?author ([^<>\n]+) <([^<>\n]+)> (\d+) \+0000\ncommitter ([^<>\n]+) <([^<>\n]+)> (\d+) \+0000\n\nworklog: append progress\n$/.exec(raw);
-        if (!match)
-            fail();
-        if ((match[2] || '') !== (commits.at(-1)?.oid || ''))
-            fail();
-        if (match[3] !== c.authorName || match[4] !== c.authorEmail || match[6] !== c.authorName || match[7] !== c.authorEmail)
-            fail('invalid_identity');
-        const tree = await git(c, ['ls-tree', '-z', match[1]]);
-        const entry = /^100644 blob ([a-f0-9]{40})\tWORKLOG.md\0$/.exec(tree);
-        if (!entry)
-            fail('invalid_content');
-        const worklog = await git(c, ['cat-file', 'blob', entry[1]]);
-        if (!validateWorklog(worklog) || !worklog || !isWorklogAppend(previous, worklog) || worklog === previous)
-            fail('invalid_content');
-        const patch = await git(c, ['diff-tree', '--root', '--no-commit-id', '--no-ext-diff', '--no-textconv', '--no-color', '-p', oid, '--', 'WORKLOG.md']);
-        commits.push({
-            oid, parents: match[2] ? [match[2]] : [], author: { name: match[3], email: match[4], time: new Date(Number(match[5]) * 1000).toISOString() }, committer: { name: match[6], email: match[7], time: new Date(Number(match[8]) * 1000).toISOString() }, message: MESSAGE, files: ['WORKLOG.md'], worklog, patch
+// Trust is scoped to one publisher transaction, never persisted between runs.
+const commitProofs = new WeakMap<CommitView, string>();
+const auditKey = (c: Config) => JSON.stringify([resolve(c.gitDir), c.authorName, c.authorEmail]);
+const auditSession = new AsyncLocalStorage<Map<string, Map<string, CommitView>>>();
+export function withAuditSession<T>(action: () => Promise<T>): Promise<T> {
+    return auditSession.run(new Map(), action);
+}
+async function withGitObjects<T>(c: Config, action: (read: (oids: string[], type: string, consume: (bytes: Buffer, index: number) => void) => Promise<void>) => Promise<T>): Promise<T> {
+    const child = spawn(GIT, [...gitOptions(c), 'cat-file', '--batch'], { env: environment(), windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
+    const closed = new Promise<boolean>(accept => {
+        child.once('error', () => accept(false));
+        child.once('close', code => accept(code === 0));
+    });
+    child.stdin.on('error', () => {});
+    child.stderr.resume(); // Native diagnostics never enter persisted errors or previews.
+    const deadline = setTimeout(() => child.kill(), 60000);
+    const output = child.stdout[Symbol.asyncIterator]();
+    let buffered: Buffer = Buffer.alloc(0);
+    async function fill(size: number): Promise<void> {
+        while (buffered.length < size) {
+            const chunk = await output.next();
+            if (chunk.done) fail('transport_failed');
+            buffered = buffered.length ? Buffer.concat([buffered, chunk.value]) : chunk.value;
+        }
+    }
+    try {
+        const result = await action(async (oids, type, consume) => {
+            if (oids.some(oid => !OID.test(oid))) fail();
+            if (oids.length) child.stdin.write(oids.join('\n') + '\n');
+            for (let index = 0; index < oids.length; index++) {
+            const oid = oids[index];
+            let end: number;
+            while ((end = buffered.indexOf(10)) < 0) {
+                if (buffered.length > 128) fail();
+                await fill(buffered.length + 1);
+            }
+            const header = /^([a-f0-9]{40}) (commit|tree|blob) (0|[1-9][0-9]*)$/.exec(buffered.subarray(0, end).toString('ascii'));
+            if (!header || header[1] !== oid || header[2] !== type) fail();
+            const size = Number(header[3]);
+            if (!Number.isSafeInteger(size) || size > 16 * 1024 * 1024) fail('invalid_content');
+            buffered = buffered.subarray(end + 1);
+            await fill(size + 1);
+            if (buffered[size] !== 10) fail();
+            const bytes = buffered.subarray(0, size);
+            buffered = buffered.subarray(size + 1);
+            if (createHash('sha1').update(`${type} ${size}\0`).update(bytes).digest('hex') !== oid) fail();
+            consume(bytes, index);
+            }
         });
-        previous = worklog;
+        child.stdin.end();
+        if (!await closed) fail('transport_failed');
+        return result;
+    } finally {
+        clearTimeout(deadline);
+        child.kill();
+        await closed;
+    }
+}
+async function audit(c: Config, target: string): Promise<CommitView[]> {
+    if (!OID.test(target)) fail();
+    const key = auditKey(c);
+    const cache = auditSession.getStore()?.get(key) || new Map<string, CommitView>();
+    auditSession.getStore()?.set(key, cache);
+    const ids = (await git(c, ['rev-list', '--reverse', target])).trim().split('\n');
+    const commits: CommitView[] = new Array(ids.length);
+    const fresh: CommitView[] = [];
+    const decode = (bytes: Buffer): string => {
+        try { return new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes); }
+        catch { return fail('invalid_content'); }
+    };
+    const pending: { index: number; tree: string; blob: string }[] = [];
+    for (let index = 0; index < ids.length; index++) {
+        const oid = ids[index];
+        if (!OID.test(oid)) fail();
+        const known = cache.get(oid);
+        if (known) {
+            if ((known.parents[0] || '') !== (index ? ids[index - 1] : '')) fail();
+            commits[index] = known;
+        } else pending.push({ index, tree: '', blob: '' });
+    }
+    await withGitObjects(c, async read => {
+        await read(pending.map(item => ids[item.index]), 'commit', (bytes, index) => {
+            const item = pending[index];
+            const parent = item.index ? ids[item.index - 1] : '';
+            const match = /^tree ([a-f0-9]{40})\n(?:parent ([a-f0-9]{40})\n)?author ([^<>\n]+) <([^<>\n]+)> (\d+) \+0000\ncommitter ([^<>\n]+) <([^<>\n]+)> (\d+) \+0000\n\nworklog: append progress\n$/.exec(decode(bytes));
+            if (!match || (match[2] || '') !== parent) fail();
+            if (match[3] !== c.authorName || match[4] !== c.authorEmail || match[6] !== c.authorName || match[7] !== c.authorEmail) fail('invalid_identity');
+            item.tree = match[1];
+            const view: CommitView = {
+                oid: ids[item.index], parents: parent ? [parent] : [], author: { name: match[3], email: match[4], time: new Date(Number(match[5]) * 1000).toISOString() }, committer: { name: match[6], email: match[7], time: new Date(Number(match[8]) * 1000).toISOString() }, message: MESSAGE, files: ['WORKLOG.md'], worklog: '', patch: ''
+            };
+            commits[item.index] = view;
+            fresh.push(view);
+        });
+        const prefix = Buffer.from('100644 WORKLOG.md\0');
+        await read(pending.map(item => item.tree), 'tree', (tree, index) => {
+            if (tree.length !== prefix.length + 20 || !tree.subarray(0, prefix.length).equals(prefix)) fail('invalid_content');
+            pending[index].blob = tree.subarray(prefix.length).toString('hex');
+        });
+        // Newest first lets old append-only worklogs share the latest string prefix.
+        const newest = [...pending].reverse();
+        await read(newest.map(item => item.blob), 'blob', (bytes, index) => {
+            const item = newest[index], next = commits[item.index + 1];
+            let worklog = decode(bytes);
+            // A complete line prefix of an already validated file inherits its fixed fields and counts.
+            const prefixOnly = next && worklog !== next.worklog && worklog.endsWith('\n') && (worklog.startsWith(WORKLOG_HEADER) || worklog.startsWith(LEGACY_WORKLOG_HEADER)) && next.worklog.startsWith(worklog);
+            if (!worklog || (!prefixOnly && (next ? !isWorklogAppend(worklog, next.worklog) : !validateWorklog(worklog)))) fail('invalid_content');
+            if (next?.worklog.startsWith(worklog)) worklog = next.worklog.slice(0, worklog.length);
+            commits[item.index].worklog = worklog;
+        });
+    });
+    const first = commits.length - fresh.length;
+    if (first && fresh.length && !isWorklogAppend(commits[first - 1].worklog, fresh[0].worklog)) fail('invalid_content');
+    if (fresh.length) {
+        const patches = (await git(c, ['log', '--reverse', '--format=%x00%H%x00', '--root', '--no-ext-diff', '--no-textconv', '--no-color', '-p', target, ...(first ? [`^${commits[first - 1].oid}`] : []), '--', 'WORKLOG.md'])).split('\0');
+        if (patches[0] !== '' || patches.length !== fresh.length * 2 + 1) fail();
+        for (let index = 0; index < fresh.length; index++) {
+            const view = fresh[index];
+            if (patches[2 * index + 1] !== view.oid) fail();
+            view.patch = patches[2 * index + 2].replace(/^\n+/, '').replace(/\n+$/, '\n');
+            Object.freeze(view.parents); Object.freeze(view.author); Object.freeze(view.committer); Object.freeze(view.files); Object.freeze(view);
+            cache.set(view.oid, view);
+            commitProofs.set(view, key);
+        }
     }
     return commits;
 }
@@ -255,7 +353,8 @@ export function checkSnapshot(c: Config, s: Snapshot): PolicyResult {
                 return { ok: false, code: 'invalid_history' };
             if (v.author.name !== c.authorName || v.committer.name !== c.authorName || v.author.email !== c.authorEmail || v.committer.email !== c.authorEmail)
                 return { ok: false, code: 'invalid_identity' };
-            if (v.files.length !== 1 || v.files[0] !== 'WORKLOG.md' || !v.worklog || !validateWorklog(v.worklog) || !isWorklogAppend(previous, v.worklog))
+            const verified = commitProofs.get(v) === auditKey(c);
+            if (!verified && (v.files.length !== 1 || v.files[0] !== 'WORKLOG.md' || !v.worklog || !isWorklogAppend(previous, v.worklog)))
                 return { ok: false, code: 'invalid_content' };
             parent = v.oid;
             previous = v.worklog;
@@ -345,7 +444,8 @@ export async function pushSnapshot(c: Config, s: Snapshot, assertOwned?: () => v
         fail();
     const actual = await audit(c, s.targetOid);
     const index = s.baselineOid === null ? -1 : actual.findIndex(x => x.oid === s.baselineOid);
-    if (s.baselineOid !== null && index < 0 || JSON.stringify(actual.slice(index + 1)) !== JSON.stringify(s.commits))
+    const outgoing = actual.slice(index + 1);
+    if (s.baselineOid !== null && index < 0 || outgoing.length !== s.commits.length || outgoing.some((view, i) => view !== s.commits[i] && JSON.stringify(view) !== JSON.stringify(s.commits[i])))
         fail();
     if (s.baselineOid === null)
         await checkEmptyRemote(c, assertOwned, s.pushUrl);

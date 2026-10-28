@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { createHash, randomBytes } from 'node:crypto';
 import { appendRows, LEGACY_WORKLOG_HEADER, WORKLOG_HEADER, toPublicRow, type Config, type LocalEvent, type StoreState, type Snapshot, type SyncResult, type Intent, type PublicRow } from './schema.js';
 import { readState, writeState, readEvents, readIntent, writeIntent, withWriterLock } from './store.js';
-import { readLocalHeadOid, readSnapshot, checkSnapshot, commitWorklog, checkEmptyRemote, refreshRemote, pushSnapshot } from './transport.js';
+import { readLocalHeadOid, readSnapshot, checkSnapshot, commitWorklog, checkEmptyRemote, refreshRemote, pushSnapshot, withAuditSession } from './transport.js';
 const hash = (text: string) => createHash('sha256').update(text).digest('hex');
 const policyCodes = ['invalid_history', 'invalid_content', 'invalid_identity', 'destination_changed', 'extra_execution'];
 function applyEvents(state: StoreState, events: LocalEvent[]): PublicRow[] {
@@ -169,7 +169,7 @@ async function syncTarget(c: Config, full: Snapshot, target: RemoteState, url: s
 export async function processOnce(c: Config): Promise<SyncResult> {
     if (!c.captureEnabled)
         return 'paused';
-    return withWriterLock(c.privateDir, async (check) => {
+    return withWriterLock(c.privateDir, (check) => withAuditSession(async () => {
         const state = await readState(c.privateDir);
         if (state.errorCode && policyCodes.includes(state.errorCode))
             return 'paused';
@@ -256,7 +256,7 @@ export async function processOnce(c: Config): Promise<SyncResult> {
             await writeState(c.privateDir, state);
             return policyCodes.includes(message) ? 'paused' : 'pending';
         }
-    });
+    }));
 }
 export async function enableSync(c: Config, interactiveAuth = false): Promise<void> {
     await withWriterLock(c.privateDir, async (check) => {
