@@ -392,6 +392,19 @@ test('successful idle remote retry clears transient sync failure', async () => {
         syncBuiltinESMExports();
     }
 });
+
+test('successful local recovery clears a prior transient failure for both append and idle', async () => {
+    const c = await fixture();
+    for (const withProgress of [true, false]) {
+        const state = await readState(c.privateDir);
+        state.errorCode = 'sync_failed';
+        await writeState(c.privateDir, state);
+        if (withProgress) await enqueue(c.privateDir, event(1));
+        assert.equal(await processOnce(c), withProgress ? 'local' : 'idle');
+        assert.equal((await readState(c.privateDir)).errorCode, undefined);
+        assert.equal((await readEvents(c.privateDir)).length, 0);
+    }
+});
 test('resume revalidates repaired local policy and still blocks invalid history', async () => {
     const c = await fixture();
     await enqueue(c.privateDir, event(1));

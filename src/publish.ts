@@ -202,8 +202,13 @@ export async function processOnce(c: Config): Promise<SyncResult> {
                     await checkpoint(c, next, events, check);
                 Object.assign(state, next);
             }
-            if (c.mode === 'local')
+            if (c.mode === 'local') {
+                if (state.errorCode) {
+                    delete state.errorCode;
+                    await writeState(c.privateDir, state);
+                }
                 return rows.length || intent ? 'local' : 'idle';
+            }
             const currentOid = await readLocalHeadOid(c);
             if (currentOid === null)
                 return 'idle';
