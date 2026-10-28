@@ -10,6 +10,8 @@ I-m-Genius helps you recognize that work. It gathers progress reported by the AI
 
 **v0.2.0 is a Windows x64 preview for Codex and Claude Code.** [Quick install](#quick-install-windows-x64) · [Build from source](#1-clone-and-build). Recording depends on the AI making a valid classification call; an entry for every conversation is not guaranteed.
 
+**Runtime fixes on `main`:** startup recovery, faster history checks and local health diagnostics were updated on October 28, 2026. The published v0.2.0 ZIP predates these fixes; use the [source installation](#1-clone-and-build) for the updated runtime.
+
 ## Why use it?
 
 - **Lightweight capture.** Native client hooks and a small local worker fit into your existing workflow. The AI already working on your task chooses a fixed category and status; there is no separate AI summarizer.
