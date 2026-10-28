@@ -652,8 +652,13 @@ export async function manageStartup(operation: 'install' | 'remove' | 'start', a
         const args = /<Arguments>([^<]*)<\/Arguments>/.exec(xml);
         const executable = command && decode(command[1]).replace(/^"|"$/g, '');
         const argumentsValue = args && decode(args[1]);
-        const owned = executable === launcher && argumentsValue === launcherArguments || executable === powershell && argumentsValue === hiddenArguments || executable === process.execPath && argumentsValue === argumentsText;
-        if ((xml.match(/<Exec(?:\s|>)/g) || []).length !== 1 || /<ComHandler(?:\s|>)/.test(xml) || !owned)
+        const samePath = (actual: string | undefined | null, expected: string) => !!actual && isAbsolute(actual) && !/[\x00-\x1f"]/.test(actual) && resolve(actual).toLowerCase() === resolve(expected).toLowerCase();
+        const gui = /^"([^"\x00-\x1f]+)" "([^"\x00-\x1f]+)" "([^"\x00-\x1f]+)"$/.exec(argumentsValue || '');
+        const node = /^"([^"\x00-\x1f]+)" sync --watch --config "([^"\x00-\x1f]+)"$/.exec(argumentsValue || '');
+        const owned = samePath(executable, launcher) && gui && [process.execPath, absoluteCli, configPath].every((path, index) => samePath(gui[index + 1], path))
+            || samePath(executable, powershell) && argumentsValue === hiddenArguments
+            || samePath(executable, process.execPath) && node && samePath(node[1], absoluteCli) && samePath(node[2], configPath);
+        if ((xml.match(/<Exec(?:\s|>)/g) || []).length !== 1 || (xml.match(/<Command>/g) || []).length !== 1 || (xml.match(/<Arguments>/g) || []).length !== 1 || /<ComHandler(?:\s|>)/.test(xml) || !owned)
             fail('startup_conflict');
         await run(scheduler, operation === 'start' ? ['/Run', '/TN', name] : ['/Delete', '/F', '/TN', name], environment(), false, true);
     }

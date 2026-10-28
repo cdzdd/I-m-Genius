@@ -292,17 +292,34 @@ export async function runCli(args: string[], input: AsyncIterable<Uint8Array> = 
             let release: (() => Promise<void>) | undefined;
             let compromised = false;
             if (watch) {
-                try {
-                    release = await lockfile.lock(join(c.privateDir, 'watcher'), { realpath: false, stale: 120000, update: 10000, retries: 0, onCompromised: () => {
-                            compromised = true;
-                        } });
-                }
-                catch (error) {
-                    if ((error as NodeJS.ErrnoException).code === 'ELOCKED') {
-                        output('already_running');
-                        return 0;
+                const lockPath = join(c.privateDir, 'watcher');
+                const deadline = Date.now() + 130000;
+                let heartbeat: number | undefined;
+                while (!release) {
+                    try {
+                        release = await lockfile.lock(lockPath, { realpath: false, stale: 120000, update: 10000, retries: 0, onCompromised: () => {
+                                compromised = true;
+                            } });
                     }
-                    throw error;
+                    catch (error) {
+                        if ((error as NodeJS.ErrnoException).code !== 'ELOCKED') throw error;
+                        let current: number | undefined;
+                        try {
+                            current = (await lstat(`${lockPath}.lock`)).mtimeMs;
+                        }
+                        catch (statError) {
+                            if ((statError as NodeJS.ErrnoException).code !== 'ENOENT') throw statError;
+                        }
+                        // Only an advancing heartbeat establishes a live owner. A reboot can
+                        // leave a recent lock whose normal stale window has not elapsed yet.
+                        if (current !== undefined && heartbeat !== undefined && current > heartbeat) {
+                            output('already_running');
+                            return 0;
+                        }
+                        heartbeat = current;
+                        if (Date.now() >= deadline) throw new Error('watcher_start_failed');
+                        await new Promise(resolve => setTimeout(resolve, 1000));
+                    }
                 }
             }
             try {
@@ -385,7 +402,7 @@ export async function runCli(args: string[], input: AsyncIterable<Uint8Array> = 
         return 0;
     }
     catch (error) {
-        const allowed = ['startup_conflict', 'watcher_lock_lost', 'private_directory_not_empty', 'invalid_arguments', 'invalid_config', 'already_initialized', 'client_conflict', 'invalid_client', 'client_config_failed', 'unsupported_install_path', 'invalid_history', 'invalid_content', 'invalid_identity', 'destination_changed', 'extra_execution'];
+        const allowed = ['startup_conflict', 'watcher_lock_lost', 'watcher_start_failed', 'private_directory_not_empty', 'invalid_arguments', 'invalid_config', 'already_initialized', 'client_conflict', 'invalid_client', 'client_config_failed', 'unsupported_install_path', 'invalid_history', 'invalid_content', 'invalid_identity', 'destination_changed', 'extra_execution'];
         const message = error instanceof Error ? error.message : '';
         if (args[0] === 'hook') {
             output(JSON.stringify({ systemMessage: `WhatIveDone hook failed: ${allowed.includes(message) ? message : 'operation_failed'}` }));

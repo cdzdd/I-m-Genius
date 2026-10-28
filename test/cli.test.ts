@@ -11,6 +11,7 @@ import { readEvents, readState, writeState } from '../src/store.js';
 import { initializeLocalRepository, commitWorklog } from '../src/transport.js';
 import { appendRows, type Config } from '../src/schema.js';
 import { createHash } from 'node:crypto';
+import lockfile from 'proper-lockfile';
 // Real init/config/preview filesystem and Git; only user task registration is doubled.
 test('init defaults local, fresh preview is empty, pause/resume persist, errors never expose input', async () => {
     const root = await mkdtemp(join(tmpdir(), 'whativedone-cli-'));
@@ -289,13 +290,61 @@ test('a second watch process exits while first keeps the lifetime lock', async (
             watcher.stdout.once('data', () => resolve());
             watcher.once('error', reject);
         });
-        const other = spawnSync(process.execPath, [cli, 'sync', '--watch', '--config', path], { encoding: 'utf8', timeout: 3000, windowsHide: true });
+        const other = spawnSync(process.execPath, [cli, 'sync', '--watch', '--config', path], { encoding: 'utf8', timeout: 20000, windowsHide: true });
         assert.equal(other.status, 0);
         assert.match(other.stdout, /already_running/);
     }
     finally {
         watcher.kill();
     }
+});
+test('watch waits for an abandoned fresh lock instead of silently exiting after reboot', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'whativedone-cli-reboot-'));
+    const path = join(root, 'config.json');
+    await writeFile(path, JSON.stringify({ privateDir: root, gitDir: join(root, 'repo'), remoteUrl: 'https://example.invalid/log.git', branch: 'worklog', authorName: 'Logger', authorEmail: 'logger@example.invalid', captureEnabled: false, mode: 'local' }));
+    const lockPath = join(root, 'watcher.lock');
+    await mkdir(lockPath);
+    const script = `import(${JSON.stringify(new URL('../src/cli.js', import.meta.url).href)}).then(async ({runCli}) => {console.log('fixture_ready'); process.exitCode = await runCli(['sync','--watch','--config',${JSON.stringify(path)}]);})`;
+    const watcher = childProcess.spawn(process.execPath, ['-e', script], { windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
+    let stdout = '';
+    watcher.stdout.on('data', chunk => { stdout += String(chunk); });
+    try {
+        await new Promise<void>((resolve, reject) => {
+            watcher.stdout.once('data', () => resolve());
+            watcher.once('error', reject);
+        });
+        assert.equal(stdout.trim(), 'fixture_ready');
+        stdout = '';
+        await new Promise(resolve => setTimeout(resolve, 1200));
+        assert.equal(watcher.exitCode, null, `a still-fresh abandoned lock must be retried: ${stdout}`);
+        assert.equal(stdout, '');
+        // Simulate the end of the normal 120-second stale window without delaying the test.
+        const staleTime = new Date(Date.now() - 121000);
+        await fs.utimes(lockPath, staleTime, staleTime);
+        await new Promise<void>((resolve, reject) => {
+            const deadline = setTimeout(() => reject(new Error('watcher did not take over the expired lock')), 7000);
+            watcher.stdout.once('data', () => { clearTimeout(deadline); resolve(); });
+            watcher.once('error', error => { clearTimeout(deadline); reject(error); });
+        });
+        assert.match(stdout, /paused/);
+        assert.equal(stdout.includes('already_running'), false);
+        assert.equal(watcher.exitCode, null);
+    }
+    finally {
+        watcher.kill();
+    }
+});
+test('watch reports a failed bounded acquisition instead of a successful background start', async t => {
+    const root = await mkdtemp(join(tmpdir(), 'whativedone-cli-lock-deadline-'));
+    const path = join(root, 'config.json');
+    await writeFile(path, JSON.stringify({ privateDir: root, gitDir: join(root, 'repo'), remoteUrl: 'https://example.invalid/log.git', branch: 'worklog', authorName: 'Logger', authorEmail: 'logger@example.invalid', captureEnabled: false, mode: 'local' }));
+    await mkdir(join(root, 'watcher.lock'));
+    t.mock.method(lockfile, 'lock', async () => { throw Object.assign(new Error('PRIVATE_CANARY'), { code: 'ELOCKED' }); });
+    let clockReads = 0;
+    t.mock.method(Date, 'now', () => clockReads++ === 0 ? 0 : 130001);
+    const lines: string[] = [];
+    assert.equal(await runCli(['sync', '--watch', '--config', path], undefined, line => lines.push(line)), 1);
+    assert.deepEqual(lines, ['{"errorCode":"watcher_start_failed"}']);
 });
 test('uninstall refuses a changed source home before altering either home', async () => {
     const root = await mkdtemp(join(tmpdir(), 'whativedone-cli-homes-'));

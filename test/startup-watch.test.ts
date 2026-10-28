@@ -143,6 +143,38 @@ test('startup starts its exact hidden action and refuses edited or extra actions
     assert.deepEqual(f.registrations.at(-1)!.args, ['/Run', '/TN', f.registrations[0].args[f.registrations[0].args.indexOf('/TN') + 1]]);
 });
 
+test('startup accepts equivalent Windows path spelling while preserving complete owned arguments', async t => {
+    const f = await fixture(t);
+    await manageStartup('install', f.cliPath, f.configPath);
+    const original = f.registrations[0].xml;
+    const equivalent = original.replace(/<(Command|Arguments)>([^<]*)<\/\1>/g, (_, tag, value) => `<${tag}>${value.replaceAll('\\', '/').toUpperCase().replace(/&[A-Z]+;/g, (entity: string) => entity.toLowerCase())}</${tag}>`);
+    f.setTaskXml(equivalent);
+    await manageStartup('start', f.cliPath, f.configPath);
+    assert.equal(f.registrations.at(-1)!.args.includes('/Run'), true);
+    const runCount = () => f.registrations.filter(x => x.args.includes('/Run')).length;
+    const before = runCount();
+    for (const changed of [
+        equivalent.replace('</Arguments>', ' --extra</Arguments>'),
+        equivalent.replace('/CONFIG.JSON', '/OTHER-CONFIG.JSON'),
+        equivalent.replace('</Actions>', '<ComHandler><ClassId>other</ClassId></ComHandler></Actions>'),
+        equivalent.replace('</Arguments>', '</Arguments><Arguments>other</Arguments>')
+    ]) {
+        f.setTaskXml(changed);
+        await assert.rejects(manageStartup('start', f.cliPath, f.configPath), { message: 'startup_conflict' });
+        assert.equal(runCount(), before);
+    }
+    const launcher = /<Command>([^<]*)<\/Command>/.exec(original)![1];
+    const node = process.execPath.replaceAll('\\', '/');
+    const cli = f.cliPath.replaceAll('\\', '/');
+    const config = f.configPath.replaceAll('\\', '/');
+    const escape = (text: string) => text.replaceAll('&', '&amp;').replaceAll("'", '&apos;');
+    const direct = original.replace(`<Command>${launcher}</Command>`, `<Command>${escape(node)}</Command>`)
+        .replace(/<Arguments>[^<]*<\/Arguments>/, `<Arguments>${escape(`"${cli}" sync --watch --config "${config}"`)}</Arguments>`);
+    f.setTaskXml(direct);
+    await manageStartup('start', f.cliPath, f.configPath);
+    assert.equal(runCount(), before + 1);
+});
+
 // A rejected OS registration must not leave task XML or expose native error output.
 test('failed startup registration removes its private task definition and returns a fixed error', async t => {
     const f = await fixture(t, true);
