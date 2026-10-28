@@ -81,3 +81,22 @@ test('batch reuse avoids object rereads but the next transaction rechecks object
         await writeFile(objectPath, original);
     } finally { cp.spawn = native; syncBuiltinESMExports(); }
 });
+
+test('malformed or oversized batch responses fail closed and terminate the reader', async () => {
+    const c = await fixture(1);
+    const native = cp.spawn;
+    for (const kind of ['oversized', 'wrong_oid']) {
+        let reader: ReturnType<typeof cp.spawn> | undefined;
+        cp.spawn = ((exe: any, args: any, options: any) => {
+            if (!args.includes('cat-file')) return native(exe, args, options);
+            const code = `process.stdin.once('data', b => { const oid = b.toString().split('\\n')[0]; process.stdout.write(${JSON.stringify(kind)} === 'oversized' ? oid + ' commit 16777217\\n' : 'f'.repeat(40) + ' commit 0\\n\\n'); }); setInterval(() => {}, 1000);`;
+            reader = native(process.execPath, ['-e', code], options);
+            return reader;
+        }) as typeof cp.spawn;
+        syncBuiltinESMExports();
+        try {
+            await assert.rejects(readSnapshot(c, await readState(c.privateDir), 0), kind === 'oversized' ? /invalid_content/ : /invalid_history/);
+            assert.equal(reader?.killed, true);
+        } finally { cp.spawn = native; syncBuiltinESMExports(); }
+    }
+});

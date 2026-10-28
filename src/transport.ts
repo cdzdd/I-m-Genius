@@ -188,6 +188,7 @@ async function withGitObjects<T>(c: Config, action: (read: (oids: string[], type
     });
     child.stdin.on('error', () => {});
     child.stderr.resume(); // Native diagnostics never enter persisted errors or previews.
+    // Bound a stalled reader, not the total time of a progressing large history.
     const deadline = setTimeout(() => child.kill(), 60000);
     const output = child.stdout[Symbol.asyncIterator]();
     let buffered: Buffer = Buffer.alloc(0);
@@ -195,6 +196,7 @@ async function withGitObjects<T>(c: Config, action: (read: (oids: string[], type
         while (buffered.length < size) {
             const chunk = await output.next();
             if (chunk.done) fail('transport_failed');
+            deadline.refresh();
             buffered = buffered.length ? Buffer.concat([buffered, chunk.value]) : chunk.value;
         }
     }

@@ -96,7 +96,7 @@ test('production source and executable package scripts have a closed audited imp
     const source = resolve(bin.replace(/^dist\//, '').replace(/\.js$/, '.ts'));
     assert.ok(runtime.has(source), `unaudited executable: ${bin}`);
   }
-  assert.deepEqual(packageJson.scripts, { build: 'tsc', test: 'npm run build && node --test dist/test/*.test.js' }, 'new executable scripts require audit coverage');
+  assert.deepEqual(packageJson.scripts, { build: 'tsc', test: 'npm run build && node --test --test-concurrency=4 dist/test/*.test.js' }, 'new executable scripts require audit coverage');
   const dependencies = new Set(Object.keys(packageJson.dependencies));
   for (const file of files) {
     const result = auditSource(relative(process.cwd(), file).replaceAll('\\', '/'), await readFile(file, 'utf8'));

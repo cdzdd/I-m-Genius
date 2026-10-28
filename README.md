@@ -104,6 +104,8 @@ The private directory must be absent or empty and separate from the source check
 
 The initial mode is `local`: this project's journal Git network operations are disabled. By default, initialization installs a current-user logon task and starts the worker immediately without a terminal window. It waits 60 seconds after processing each batch, runs without elevation, and requires a logged-in user. Processing and network time add to this interval.
 
+After a quick reboot, the worker waits for an abandoned lock to expire instead of silently skipping startup. Duplicate starts wait for an advancing heartbeat (normally within 10 seconds) before reporting an existing worker; a failed start has a 130-second retry limit. History checks batch Git-object reads and reuse immutable, validated results within one processing batch. Later batches re-read history when an audit is needed; no persistent trust cache is created.
+
 For manual processing, append `--no-startup` to `init`, then keep this command running while you want the journal updated:
 
 ```powershell
