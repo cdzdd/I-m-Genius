@@ -203,30 +203,34 @@ async function withGitObjects<T>(c: Config, action: (read: (oids: string[], type
             if (oids.some(oid => !OID.test(oid))) fail();
             if (oids.length) child.stdin.write(oids.join('\n') + '\n');
             for (let index = 0; index < oids.length; index++) {
-            const oid = oids[index];
-            let end: number;
-            while ((end = buffered.indexOf(10)) < 0) {
-                if (buffered.length > 128) fail();
-                await fill(buffered.length + 1);
-            }
-            const header = /^([a-f0-9]{40}) (commit|tree|blob) (0|[1-9][0-9]*)$/.exec(buffered.subarray(0, end).toString('ascii'));
-            if (!header || header[1] !== oid || header[2] !== type) fail();
-            const size = Number(header[3]);
-            if (!Number.isSafeInteger(size) || size > 16 * 1024 * 1024) fail('invalid_content');
-            buffered = buffered.subarray(end + 1);
-            await fill(size + 1);
-            if (buffered[size] !== 10) fail();
-            const bytes = buffered.subarray(0, size);
-            buffered = buffered.subarray(size + 1);
-            if (createHash('sha1').update(`${type} ${size}\0`).update(bytes).digest('hex') !== oid) fail();
-            consume(bytes, index);
+                const oid = oids[index];
+                let end: number;
+                while ((end = buffered.indexOf(10)) < 0) {
+                    if (buffered.length > 128) fail();
+                    await fill(buffered.length + 1);
+                }
+                const header = /^([a-f0-9]{40}) (commit|tree|blob) (0|[1-9][0-9]*)$/.exec(buffered.subarray(0, end).toString('ascii'));
+                if (!header || header[1] !== oid || header[2] !== type) fail();
+                const size = Number(header[3]);
+                if (!Number.isSafeInteger(size) || size > 16 * 1024 * 1024) fail('invalid_content');
+                buffered = buffered.subarray(end + 1);
+                await fill(size + 1);
+                if (buffered[size] !== 10) fail();
+                const bytes = buffered.subarray(0, size);
+                buffered = buffered.subarray(size + 1);
+                if (createHash('sha1').update(`${type} ${size}\0`).update(bytes).digest('hex') !== oid) fail();
+                consume(bytes, index);
             }
         });
         child.stdin.end();
+        child.stdout.resume();
         if (!await closed) fail('transport_failed');
         return result;
     } finally {
         clearTimeout(deadline);
+        child.stdout.destroy();
+        child.stdin.destroy();
+        child.stderr.destroy();
         child.kill();
         await closed;
     }
@@ -253,7 +257,7 @@ async function audit(c: Config, target: string): Promise<CommitView[]> {
             commits[index] = known;
         } else pending.push({ index, tree: '', blob: '' });
     }
-    await withGitObjects(c, async read => {
+    if (pending.length) await withGitObjects(c, async read => {
         await read(pending.map(item => ids[item.index]), 'commit', (bytes, index) => {
             const item = pending[index];
             const parent = item.index ? ids[item.index - 1] : '';
